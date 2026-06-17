@@ -1,0 +1,43 @@
+
+# --- Python 字节码缓存 ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- 本地模型缓存（.models/ 目录，所有框架下载的模型都放这里）---
+.models/
+
+TTS_env/CosyVoice/*
+!TTS_env/CosyVoice/.gitkeep
+
+ASR_env/SenseVoice/*
+!ASR_env/SenseVoice/.gitkeep
+
+.venv/
+.idea/
+
+plugins_data/
+
+# 本地密钥文件 (API Key)
+.env
+
+# --- 运行时日志 ---
+logs/*.log
+!logs/.gitkeep
+
+# --- TTS 生成音频 ---
+TTS_env/output_voice/*.wav
+TTS_env/output_voice_text.txt
+!TTS_env/output_voice/.gitkeep
+
+# --- TTS 历史音频 ---
+TTS_env/voice_history/*.wav
+
+# --- ASR 输入音频 ---
+ASR_env/input_voice/*.wav
+
+# --- LLM 对话记录 ---
+LLM_env/conversation_history.txt
+
+# --- 插件数据目录 ---
+!plugins_data/.gitkeep
