@@ -154,15 +154,15 @@ class LLMManager:
 
         # 判断模型是否生成了工具调用指令
         if msg.tool_calls:
-            # 遍历所有工具调用，转换成项目统一字典格式存入result
             result["tool_calls"] = [
                 {
-                    # 工具调用唯一ID
                     "id": tc.id,
-                    # 工具函数信息：函数名、入参JSON字符串
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    "type": "function",          #  补
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    },
                 }
-                # 循环遍历模型返回的每一条工具调用对象
                 for tc in msg.tool_calls
             ]
         # 封装好标准化结构返回上层agent_think节点
