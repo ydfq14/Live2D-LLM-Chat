@@ -47,4 +47,5 @@ soundfile         # 音频文件读写
 # ==================== 视频模块 ====================
 mediapipe 
 opencv-python
-
+chromadb
+sentence-transformers
