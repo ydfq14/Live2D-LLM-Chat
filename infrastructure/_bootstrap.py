@@ -30,6 +30,12 @@ def apply() -> None:
     # --- PyTorch ---
     os.environ.setdefault("TORCH_HOME", os.path.join(_MODELS_DIR, "torch"))
 
+    # --- sentence-transformers（emotion_rag_plugin 的嵌入模型）---
+    os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", os.path.join(_MODELS_DIR, "sentence_transformers"))
+
+    # --- TensorFlow Hub（FER 面部情绪识别模型缓存，预留）---
+    os.environ.setdefault("TFHUB_CACHE_DIR", os.path.join(_MODELS_DIR, "tfhub"))
+
 
 # 导入时自动生效
 apply()

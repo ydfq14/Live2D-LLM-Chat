@@ -1,31 +1,24 @@
 # === 启动引导：必须在所有 import 之前，将模型缓存重定向到项目 .models/ 目录 ===
-# 最优先执行环境引导脚本，修改环境变量，把HuggingFace等模型缓存路径改到本地项目内.models文件夹
-import infrastructure._bootstrap  # noqa: F401 — noqa:F401 告诉linter导入未使用无需告警
+import infrastructure._bootstrap  # noqa: F401
 
-# 导入多线程模块，用于单独开辟线程运行Live2D渲染窗口（避免阻塞语音对话主循环）
 import threading
-# 导入日期时间模块，用于对话记录写入时间戳
 import datetime
-# 从自定义日志配置文件导入日志获取函数，统一管理程序日志输出
+import sys
 from log_config import get_logger
-# 导入云端/本地TTS接口管理类，负责本地语音合成服务API启动
 from TTS_api import TTSAPIManager
-# 导入语音识别管理类（ASR：语音转文字 Audio Speech Recognition）
 from ASR import ASRManager
-# 导入TTS语音合成管理类（文字转语音 Text To Speech）
 from TTS import TTSManager
-# 导入大语言模型对话管理类，负责接收用户输入并生成AI回复
 from LLM import LLMManager
-# 导入带渲染、追眼、嘴型同步功能的Live2D桌宠动画管理器
 from Live2d_animation import Live2DAnimationManager
-# 导入全局配置文件，读取所有模式开关、文件路径、参数常量
 from config import Config
-# 导入插件注册中心，管理所有插件的加载/卸载/事件广播
 from plugin_registry import PluginRegistry
-# 导入 pywebview 前端容器，承载各插件 UI 面板（网页桌面窗口）
 from ui_shell import UIShell
-# 导入 LangGraph 图引擎，替代原线性管道模式，支持工具调用、多分支智能体流程
 from graph_engine import GraphEngine
+
+# IOCP事件循环核心导入
+import asyncio
+from event_loop import get_scheduler, shutdown_scheduler
+from async_wrapper import run_sync
 
 # 获取当前模块(main.py)专属日志实例，日志会自动标注当前文件名称，区分多模块日志
 logger = get_logger(__name__)
@@ -39,6 +32,8 @@ _stop_event = threading.Event()
 _recording_abort = threading.Event()
 # 忙碌锁事件：录音中/AI生成回复/TTS播放时置为True，前端禁用输入按钮防止并发冲突
 _busy_event = threading.Event()
+# 聆听控制事件：默认关闭（静音），需要用户手动开启
+_listening_enabled = threading.Event()  # 默认不 set，即默认静音
 
 
 # ==================================================================
@@ -79,6 +74,13 @@ class MainManager:
         """
         # 第一步打印启动LOGO横幅
         _print_startup_banner()
+
+        # 保存全局事件引用，供插件访问
+        self._listening_enabled = _listening_enabled
+        self._text_input_queue = _text_input_queue
+        self._recording_abort = _recording_abort
+        self._busy_event = _busy_event
+        self._stop_event = _stop_event
 
         # ================================================================
         #  阶段 0: 项目基础信息打印，日志输出环境基础配置
@@ -202,152 +204,183 @@ class MainManager:
         logger.info("    [OK] 渲染窗口就绪")
 
         # 打印初始化完成汇总面板，快速查看系统整体状态
+        bg_tasks = self.registry.get_background_tasks()
         logger.info("")
         logger.info("┌──────────────────────────────────────────────────────────────┐")
         logger.info("│              初始化完成 — 系统就绪                            │")
         logger.info("├──────────────────────────────────────────────────────────────┤")
         logger.info("│  ASR: %-10s │ TTS: %-10s │ LLM: %-10s          │",
                      Config.ASR_MODE, Config.TTS_MODE, Config.LLM_MODE)
-        logger.info("│  插件: %-2d 个   │ 架构: LangGraph Agent                    │",
-                     len(loaded))
-        logger.info("│  交互: 语音 / 聊天框   │ 输入方式: VAD 自动录音             │")
+        logger.info("│  插件: %-2d 个   │ 后台任务: %-2d 个                         │",
+                     len(loaded), len(bg_tasks))
+        logger.info("│  架构: IOCP Agent │ 输入方式: VAD 自动录音                  │")
         logger.info("└──────────────────────────────────────────────────────────────┘")
         logger.info("")
 
-    # 主交互循环 — LangGraph 智能体模式核心对话逻辑
-    def run(self):
-        """主交互循环 — LangGraph 智能体模式
+    # ==================================================================
+    #  主交互循环 — IOCP Agent 模式
+    # ==================================================================
 
-        每次循环执行流程：
-          1. 获取用户输入（优先读取聊天框队列 无文字则启动VAD录音+ASR转文字）
-          2. 调用 GraphEngine.invoke() 运行完整智能体图（插件钩子→LLM思考→工具调用→TTS语音播放→Live2D嘴型动画）
-          3. 将智能体更新后的对话上下文同步回LLM管理器
-          4. 持久化保存本轮对话记录到本地历史文件
+    def run(self):
+        """主交互循环 — IOCP Agent 模式
+
+        基于 asyncio ProactorEventLoop（Windows IOCP）实现：
+        - 用户输入在线程池中非阻塞等待（VAD录音不阻塞事件循环）
+        - 后台任务（日程提醒等）自动执行，不依赖用户对话
+        - 插件通过 on_register_background_tasks 注册的定时任务持续运行
         """
         logger.info("")
         logger.info("╔════════════════════════════════════════════════════════════════╗")
-        logger.info("║            主对话循环启动  [LangGraph Agent 模式]              ║")
+        logger.info("║            主对话循环启动  [IOCP Agent 模式]                   ║")
         logger.info("╚════════════════════════════════════════════════════════════════╝")
         logger.info("")
 
-        # 对话轮次计数器，标记当前是第几轮对话
-        round_num = 0
+        scheduler = get_scheduler()
+        self._round_num = 0
 
-        # 主循环：未触发停止事件则持续循环对话
+        # 注册用户输入处理协程到事件循环
+        scheduler.loop.create_task(self._async_input_loop())
+
+        # 运行事件循环（阻塞，直到 stop() 被调用）
+        scheduler.run_forever()
+
+        # 清理资源
+        self._cleanup()
+
+    async def _async_input_loop(self):
+        """IOCP模式：异步用户输入处理循环"""
         while not _stop_event.is_set():
-            # 每轮对话轮次+1
-            round_num += 1
-
-            # ================================================================
-            #  空闲态：清除忙碌锁，前端输入框解除禁用，允许用户输入
-            # ================================================================
+            self._round_num += 1
             _busy_event.clear()
 
-            # ────────── ① 优先检查聊天框文本输入队列 ──────────
-            # 声明使用全局消息队列变量
-            global _text_input_queue
-            # 判断队列是否存在前端输入文本
+            user_input = None
+            source = None
+
+            # ① 优先检查聊天框输入
             if _text_input_queue:
-                # 取出队列头部第一条用户消息
                 user_input = _text_input_queue.pop(0)
-                # 设置忙碌锁，锁定前端输入
                 _busy_event.set()
-                # 标记输入来源为网页聊天框
                 source = "chatbox"
                 logger.info("")
                 logger.info("══════════════════════════════════════════════════════════════")
-                logger.info("  第 %d 轮对话 [聊天框输入]", round_num)
+                logger.info("  第 %d 轮对话 [聊天框输入]", self._round_num)
                 logger.info("══════════════════════════════════════════════════════════════")
                 logger.info("[输入] 聊天框: %s", user_input)
+
+            # ② 无文字输入，检查是否允许聆听
             else:
-                # ────────── ② 无文字输入，启动VAD自动录音分支 ──────────
-                # 读取配置音频临时保存路径
-                user_wav = Config.ASR_AUDIO_INPUT
+                # 检查聆听是否开启
+                listening_status = _listening_enabled.is_set()
+                if not listening_status:
+                    # 聆听已关闭，短暂等待后继续检查
+                    await asyncio.sleep(1)
+                    continue
+
                 logger.info("")
                 logger.info("══════════════════════════════════════════════════════════════")
-                logger.info("  第 %d 轮对话 [语音输入]", round_num)
+                logger.info("  第 %d 轮对话 [语音输入]", self._round_num)
                 logger.info("══════════════════════════════════════════════════════════════")
                 logger.info("[输入] VAD 录音中（说话即可）...")
 
-                # 将全局录音中断事件注入ASR管理器，文字输入可打断录音
+                user_wav = Config.ASR_AUDIO_INPUT
                 self.asr_manager._abort_event = _recording_abort
-                # 阻塞式录音，带VAD静音检测，返回是否捕获有效人声
-                recording_done = self.asr_manager.record_audio(user_wav)
+
+                # 在线程池中执行阻塞录音，不阻塞事件循环
+                try:
+                    recording_done = await run_sync(
+                        self.asr_manager.record_audio, user_wav
+                    )
+                except Exception as e:
+                    logger.error("[输入] 录音异常: %s", e)
+                    recording_done = False
+
                 logger.info("[输入] VAD 录音结束 → %s", user_wav)
 
-                # 录音无有效人声，跳过本轮循环，回到空闲等待输入状态
                 if not recording_done:
                     logger.info("[输入] 录音未触发（无有效语音），跳过")
+                    # 短暂等待再检查（事件循环中使用asyncio.sleep）
+                    await asyncio.sleep(0.1)
                     continue
 
-                # 捕获人声，设置忙碌锁，禁止前端输入
                 _busy_event.set()
 
-                # ASR音频转文字识别
+                # ASR识别（在线程池中非阻塞）
                 logger.info("[输入] ASR 识别中...")
-                user_input = self.asr_manager.recognize_speech(user_wav)
+                try:
+                    user_input = await run_sync(
+                        self.asr_manager.recognize_speech, user_wav
+                    )
+                except Exception as e:
+                    logger.error("[输入] ASR识别异常: %s", e)
+                    await asyncio.sleep(0.1)
+                    continue
+
                 logger.info('[输入] ASR 结果: "%s"', user_input)
-                # 标记输入来源为麦克风语音
                 source = "voice"
 
-            # ================================================================
-            #  LangGraph 智能体图执行入口
-            #  图内部完整链路：全局插件前置Hook → LLM生成回复 → 工具循环调用 → TTS语音合成播放 → Live2D嘴型同步动画
-            # ================================================================
+            # ③ 执行LangGraph智能体图（在线程池中非阻塞）
             logger.info("[Graph] ====== 调用 GraphEngine.invoke() ======")
 
-            # 传入本轮对话全部上下文参数，执行智能体图流程
-            result = self.graph_engine.invoke({
-                "user_input": user_input,       # 用户原始输入文本
-                "user_source": source,          # 输入来源 chatbox/voice
-                "messages": list(self.llm_manager.conversation), # 历史对话上下文
-                "round_num": round_num,          # 当前对话轮次
-                "tool_loop_count": 0,            # 工具调用循环计数器初始值
-            })
+            try:
+                result = await run_sync(
+                    self.graph_engine.invoke,
+                    {
+                        "user_input": user_input,
+                        "user_source": source,
+                        "messages": list(self.llm_manager.conversation),
+                        "round_num": self._round_num,
+                        "tool_loop_count": 0,
+                    },
+                )
+            except Exception as e:
+                logger.error("[Graph] 异常: %s", e)
+                await asyncio.sleep(0.1)
+                continue
 
-            # 将智能体处理后更新的完整对话上下文同步回LLM管理器
-            self.llm_manager.conversation = result.get("messages", self.llm_manager.conversation)
+            # 同步对话上下文
+            self.llm_manager.conversation = result.get(
+                "messages", self.llm_manager.conversation
+            )
 
-            # 从图引擎返回结果取出AI最终回复文本
+            # 保存对话历史
             final_reply = result.get("final_reply", "")
-            # 追加写入本地对话历史文件，utf-8编码防止中文乱码
             with open(self.history_file, "a", encoding="utf-8") as f:
-                # 获取当前时间戳
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # 写入时间、用户消息、AI回复，分割线区分轮次
                 f.write(f"Time：{timestamp}\n")
                 f.write(f"User：{user_input}\nNeko：{final_reply}\n---\n")
 
             logger.info("[Graph] ====== GraphEngine.invoke() 返回 =====")
-            # 打印AI回复前80字符预览，避免日志过长
             logger.info("[Graph] 最终回复 (%d 字符): %s", len(final_reply), final_reply[:80])
 
-            # 智能体标记需要退出程序，跳出主对话循环
             if result.get("should_exit"):
                 logger.info("[退出] 用户请求退出，结束对话循环")
+                _stop_event.set()
+                get_scheduler().stop()
                 break
 
-            logger.info("[循环] 第 %d 轮完成，准备下一轮...", round_num)
+            logger.info("[循环] 第 %d 轮完成，准备下一轮...", self._round_num)
 
-        # ================================================================
-        #  循环退出后统一资源关闭清理流程
-        # ================================================================
-        # 清除忙碌锁
+        logger.info("[IOCP] 用户输入循环退出")
+
+    def _cleanup(self):
+        """统一资源清理"""
         _busy_event.clear()
         logger.info("")
         logger.info("╔════════════════════════════════════════════════════════════════╗")
         logger.info("║                  关闭序列 — 清理资源                          ║")
         logger.info("╚════════════════════════════════════════════════════════════════╝")
 
-        # 向所有已启用插件广播程序关闭事件，插件释放自有资源
         logger.info("[关闭] 广播 on_shutdown 到 %d 个插件...", len(self.registry.enabled_plugins))
         self.registry.broadcast_on_shutdown()
         logger.info("[关闭] on_shutdown 广播完成")
 
-        # 停止pywebview网页UI窗口
         logger.info("[关闭] 停止 UI 前端...")
         self.ui_shell.stop()
         logger.info("[关闭] UI 前端已停止")
+
+        logger.info("[关闭] 关闭 IOCP 调度器...")
+        shutdown_scheduler()
+        logger.info("[关闭] IOCP 调度器已关闭")
 
         logger.info("[关闭] 主循环结束，系统已安全退出。")
         logger.info("")
@@ -358,38 +391,33 @@ class MainManager:
 if __name__ == "__main__":
     logger.info("================================================================")
     logger.info("  VirtuMate 启动")
-    logger.info("  Python: 3.13 | 架构: LangGraph Agent | 线程: 主+Live2D+对话")
+    logger.info("  Python: %s | 架构: IOCP Agent | 线程: 主+Live2D+对话",
+                sys.version.split()[0])
     logger.info("================================================================")
     logger.info("")
 
     logger.info(">>> 创建 MainManager（全模块初始化）...")
-    # 实例化顶层主管理器，自动执行__init__，完成全模块初始化、启动Live2D渲染线程
     main_manager = MainManager()
     logger.info(">>> MainManager 创建完成")
 
-    logger.info(">>> 启动对话循环线程...")
-    # 创建守护线程运行对话主循环run()，命名方便日志区分线程
+    # 启动IOCP对话循环线程（后台任务自动执行）
+    logger.info(">>> 启动IOCP对话循环线程...")
     conv_thread = threading.Thread(
         target=main_manager.run, daemon=True, name="conv-loop"
     )
-    # 启动对话循环子线程
     conv_thread.start()
-    logger.info(">>> 对话循环线程已启动 (tid=%s)", conv_thread.ident)
+    logger.info(">>> IOCP对话循环线程已启动 (tid=%s)", conv_thread.ident)
 
     # 主线程专门阻塞运行pywebview前端窗口事件循环
-    # pywebview要求窗口必须在主线程创建运行，否则渲染异常
     logger.info(">>> 主线程进入 pywebview 事件循环（阻塞）...")
     logger.info(">>> 【提示】关闭 Live2D 窗口或按 Ctrl+C 退出程序")
     logger.info("")
     try:
-        # 主线程阻塞，持续运行网页窗口
         main_manager.ui_shell.run_on_main_thread()
     except KeyboardInterrupt:
-        # 用户按下Ctrl+C捕获中断信号
         logger.info("")
         logger.info(">>> 收到 Ctrl+C，开始退出...")
     finally:
-        # 无论正常关闭窗口还是Ctrl+C中断，都会执行finally代码块
-        # 设置全局停止事件，通知对话循环子线程退出while循环
         _stop_event.set()
+        shutdown_scheduler()
         logger.info(">>> 程序正常退出。")

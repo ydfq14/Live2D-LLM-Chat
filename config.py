@@ -42,6 +42,12 @@ class Config:
     MIMO_API_KEY = os.getenv("MIMO_API_KEY", "")
     MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"  # 按量付费；Token Plan 用 https://token-plan-cn.xiaomimimo.com/v1
 
+    # ==================== Agentic RAG LLM 配置 ====================
+    # 用于知识库智能检索的独立 LLM Agent（默认复用 MIMO 配置）
+    AGENTIC_RAG_LLM_MODEL = os.getenv("AGENTIC_RAG_LLM_MODEL", "mimo-v2.5-pro")
+    AGENTIC_RAG_LLM_BASE_URL = os.getenv("AGENTIC_RAG_LLM_BASE_URL", MIMO_BASE_URL)
+    AGENTIC_RAG_LLM_API_KEY = os.getenv("AGENTIC_RAG_LLM_API_KEY", MIMO_API_KEY)
+
     # 云端 ASR（MiMo-V2.5-ASR）
     MIMO_ASR_MODEL = "mimo-v2.5-asr"
     MIMO_ASR_LANGUAGE = "auto"  # "auto" | "zh" | "en"
@@ -86,6 +92,18 @@ class Config:
     WEBUI_SAVE_DIR = os.path.join(PROJECT_ROOT, "TTS_env/output_voice/")
     WEBUI_HISTORY_DIR = os.path.join(PROJECT_ROOT, "TTS_env/voice_history/")
     WEBUI_MODEL_DIR = os.path.join(PROJECT_ROOT, "TTS_env/CosyVoice/pretrained_models/CosyVoice2-0.5B")
+
+    # ==================== IOCP 配置 ====================
+    # IOCP工作线程数（0=自动，通常为 CPU核心数 * 2）
+    IOCP_MAX_WORKERS = int(os.getenv("IOCP_MAX_WORKERS", "0"))
+
+    # 后台任务检查间隔（秒）
+    # 影响日程提醒等后台任务的检查频率
+    IOCP_TASK_CHECK_INTERVAL = float(os.getenv("IOCP_TASK_CHECK_INTERVAL", "1.0"))
+
+    # 异步包装器配置
+    # 同步代码（ASR/TTS/Live2D）在线程池中的超时时间（秒）
+    ASYNC_WRAPPER_TIMEOUT = float(os.getenv("ASYNC_WRAPPER_TIMEOUT", "30.0"))
 
 # 可用于打印检查配置
 if __name__ == "__main__":

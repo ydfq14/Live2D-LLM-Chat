@@ -46,6 +46,8 @@ class PluginRegistry:
         self._plugin_dir: str = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "plugins"
         )
+        # 已注册的后台任务记录
+        self._background_tasks: dict[str, dict] = {}
 
     # ==================================================================
     #  发现与加载：自动扫描并实例化所有插件
@@ -103,7 +105,8 @@ class PluginRegistry:
                         hooks = []
                         for hook in ("on_user_input", "on_llm_context", "on_llm_response",
                                      "on_before_tts", "on_tick", "on_register_tools",
-                                     "on_execute_tool", "get_frontend_html"):
+                                     "on_execute_tool", "get_frontend_html",
+                                     "on_register_background_tasks", "on_task_complete"):
                             base_method = getattr(PluginBase, hook)
                             override = getattr(type(instance), hook)
                             if override is not base_method:
@@ -252,10 +255,76 @@ class PluginRegistry:
         # 封装启动钩子广播，统一传入主管理器实例
         self.broadcast("on_startup", app)
 
+        # 收集所有插件的后台任务
+        self._collect_background_tasks()
+
     def broadcast_on_shutdown(self) -> None:
         """on_shutdown 广播。"""
         # 封装退出清理钩子广播
         self.broadcast("on_shutdown")
+
+    # ==================================================================
+    #  IOCP 后台任务管理
+    # ==================================================================
+
+    def _collect_background_tasks(self) -> None:
+        """从所有已启用插件收集后台任务，注册到IOCP调度器。"""
+        from event_loop import get_scheduler
+        import asyncio
+
+        scheduler = get_scheduler()
+        total = 0
+
+        for plugin in self.enabled_plugins:
+            try:
+                tasks = plugin.on_register_background_tasks()
+                if not tasks:
+                    continue
+
+                for task_def in tasks:
+                    task_id = f"{plugin.name}_{task_def['task_id']}"
+                    original_callback = task_def["callback"]
+                    interval = task_def.get("interval", 30)
+                    description = task_def.get("description", "")
+                    immediate = task_def.get("immediate", False)
+
+                    # 包装回调：执行完成后通知插件
+                    async def wrapped_callback(tid=task_id, cb=original_callback, p=plugin):
+                        try:
+                            if asyncio.iscoroutinefunction(cb):
+                                result = await cb()
+                            else:
+                                result = cb()
+                            p.on_task_complete(tid, result)
+                            return result
+                        except Exception as e:
+                            logger.error("[IOCP] 任务 %s 执行失败: %s", tid, e)
+
+                    scheduler.schedule_task(
+                        task_id=task_id,
+                        interval=interval,
+                        callback=wrapped_callback,
+                        description=description,
+                        immediate=immediate,
+                    )
+
+                    self._background_tasks[task_id] = {
+                        "plugin": plugin.name,
+                        "interval": interval,
+                        "description": description,
+                    }
+                    total += 1
+
+            except Exception as e:
+                logger.error("[IOCP] 插件 %s 注册后台任务失败: %s", plugin.name, e)
+                logger.debug(traceback.format_exc())
+
+        if total:
+            logger.info("[IOCP] 共注册 %d 个后台任务", total)
+
+    def get_background_tasks(self) -> dict[str, dict]:
+        """获取所有已注册的后台任务信息"""
+        return self._background_tasks.copy()
 
     # ==================================================================
     #  LangGraph 工具注册与执行

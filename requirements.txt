@@ -44,6 +44,11 @@ soundfile         # 音频文件读写
 # Live2D 模型需从 https://github.com/Arkueid/live2d-py 获取示例模型
 
 
+# ==================== LangGraph / LangChain（Agentic RAG 需要） ====================
+langchain-core
+langchain-openai
+langgraph
+
 # ==================== 视频模块 ====================
 mediapipe 
 opencv-python

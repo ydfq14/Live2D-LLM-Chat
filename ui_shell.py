@@ -122,6 +122,40 @@ class UIShell:
                 except Exception as e:
                     return f'{{"error": "{e}"}}'
 
+            def select_file(self, filename: str = "") -> str:
+                """打开文件选择对话框，返回选择的文件路径。
+
+                Args:
+                    filename: 提示的文件名（可选）
+
+                Returns:
+                    文件路径字符串，如果取消则返回空字符串
+                """
+                try:
+                    import webview
+                    # 打开文件选择对话框
+                    file_types = (
+                        '文本文件 (*.txt;*.md;*.csv)',
+                        'PDF 文件 (*.pdf)',
+                        'JSON 文件 (*.json)',
+                        '所有文件 (*.*)'
+                    )
+                    result = self._shell._window.create_file_dialog(
+                        webview.OPEN_DIALOG,
+                        allow_multiple=False,
+                        file_types=file_types
+                    )
+                    if result and len(result) > 0:
+                        file_path = result[0]
+                        logger.info(f"[UI] 选择文件: {file_path}")
+                        return file_path
+                    else:
+                        logger.info("[UI] 取消文件选择")
+                        return ""
+                except Exception as e:
+                    logger.error(f"[UI] 文件选择失败: {e}")
+                    return ""
+
         self._window = webview.create_window(
             title="VirtuMate — 助手面板",
             html=html,

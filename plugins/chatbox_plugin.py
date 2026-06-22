@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from plugin_base import PluginBase
 from log_config import get_logger
 
@@ -24,6 +25,7 @@ class ChatboxPlugin(PluginBase):
         super().__init__()
         # 消息列表（供前端轮询展示）
         self._messages: list[dict[str, str]] = []
+        self._listening_enabled = None  # 从 app 获取
 
     # ==================================================================
     #  Hook
@@ -31,7 +33,12 @@ class ChatboxPlugin(PluginBase):
 
     def on_startup(self, app) -> None:
         super().on_startup(app)
-        logger.info("[chatbox] 聊天框插件已就绪，可打字对话。")
+        # 从 app 获取全局聆听控制事件（确保是同一个对象）
+        if hasattr(app, '_listening_enabled'):
+            self._listening_enabled = app._listening_enabled
+            logger.info("[chatbox] 聊天框插件已就绪，可打字对话。聆听控制已连接。")
+        else:
+            logger.warning("[chatbox] app 对象没有 _listening_enabled 属性")
 
     def on_user_input(self, text: str) -> str | None:
         """记录用户消息，不修改文本。"""
@@ -72,6 +79,32 @@ class ChatboxPlugin(PluginBase):
         """清空消息列表。"""
         self._messages.clear()
         return "ok"
+
+    # ==================================================================
+    #  聆听控制 API
+    # ==================================================================
+
+    def toggle_listening(self) -> str:
+        """切换聆听状态（开/关）。"""
+        if self._listening_enabled is None:
+            logger.error("[chatbox] _listening_enabled 未初始化！")
+            return json.dumps({"enabled": False, "error": "聆听控制未初始化"})
+
+        if self._listening_enabled.is_set():
+            self._listening_enabled.clear()  # 关闭聆听
+            logger.info("[chatbox] 聆听已关闭（静音模式）")
+            return json.dumps({"enabled": False})
+        else:
+            self._listening_enabled.set()  # 开启聆听
+            logger.info("[chatbox] 聆听已开启，状态: %s", self._listening_enabled.is_set())
+            return json.dumps({"enabled": True})
+
+    def get_listening_status(self) -> str:
+        """获取当前聆听状态。"""
+        if self._listening_enabled is None:
+            return json.dumps({"enabled": False, "error": "聆听控制未初始化"})
+
+        return json.dumps({"enabled": self._listening_enabled.is_set()})
 
     # ==================================================================
     #  前端 HTML
@@ -144,6 +177,16 @@ class ChatboxPlugin(PluginBase):
     cursor: pointer;
     transition: background 0.2s;
 }
+.listen-btn {
+    padding: 8px 12px !important;
+    min-width: 90px;
+    font-size: 12px !important;
+    background: #555 !important;
+    white-space: nowrap;
+}
+.listen-btn.enabled {
+    background: #e94560 !important;
+}
 .chatbox-input-row input:disabled, .chatbox-input-row button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
@@ -177,6 +220,7 @@ class ChatboxPlugin(PluginBase):
     </div>
     <div class="chatbox-status idle" id="chatboxStatus">空闲 — 可以输入</div>
     <div class="chatbox-input-row">
+        <button id="listenBtn" class="listen-btn" onclick="toggleListening()">⚪ 静音中</button>
         <input id="chatboxInput" type="text" placeholder="输入消息..." autofocus />
         <button id="chatboxSendBtn">发送</button>
     </div>
@@ -188,8 +232,44 @@ class ChatboxPlugin(PluginBase):
     var input = document.getElementById('chatboxInput');
     var btn = document.getElementById('chatboxSendBtn');
     var statusEl = document.getElementById('chatboxStatus');
+    var listenBtn = document.getElementById('listenBtn');
     var nextIndex = 0;
     var hasMessages = false;
+    var isListening = false;
+
+    // --- 聆听控制 ---
+    window.toggleListening = function() {
+        try {
+            pywebview.api.call_plugin('chatbox', 'toggle_listening').then(function(raw) {
+                var data = JSON.parse(raw);
+                isListening = data.enabled;
+                updateListenButton();
+            }).catch(function(e) { console.error(e); });
+        } catch(e) { console.error(e); }
+    }
+
+    function updateListenButton() {
+        if (isListening) {
+            listenBtn.textContent = '🔴 聆听中';
+            listenBtn.className = 'listen-btn enabled';
+        } else {
+            listenBtn.textContent = '⚪ 静音中';
+            listenBtn.className = 'listen-btn';
+        }
+    }
+
+    // 轮询聆听状态
+    function pollListeningStatus() {
+        try {
+            pywebview.api.call_plugin('chatbox', 'get_listening_status').then(function(raw) {
+                var data = JSON.parse(raw);
+                isListening = data.enabled;
+                updateListenButton();
+            }).catch(function(){});
+        } catch(e) {}
+    }
+    setInterval(pollListeningStatus, 1000);
+    pollListeningStatus();
 
     // --- 发送 ---
     function send() {

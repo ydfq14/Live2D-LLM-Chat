@@ -113,6 +113,50 @@ class PluginBase:
         pass
 
     # ==================================================================
+    #  IOCP 后台任务 Hook（异步事件循环模式）
+    # ==================================================================
+
+    def on_register_background_tasks(self) -> list[dict]:
+        """【IOCP专用】注册后台定时任务，不依赖用户输入即可定期执行。
+
+        任务会在独立的异步事件循环中运行，适合：
+        - 定时检查提醒（日程管理）
+        - 轮询外部状态（天气、新闻）
+        - 定期数据同步
+
+        Returns:
+            任务列表，格式：
+            [
+                {
+                    "task_id": "unique_id",           # 任务唯一标识（建议用 插件名_功能 ）
+                    "interval": 30,                    # 执行间隔（秒）
+                    "callback": self._my_callback,     # 回调函数（同步或异步均可）
+                    "description": "检查日程提醒",      # 任务描述（可选）
+                    "immediate": False                 # 是否立即执行第一次（可选，默认False）
+                }
+            ]
+
+        Note:
+            - 不实现此方法的插件不受影响
+            - 回调函数如果是 async def 会直接 await，普通 def 会在线程池中执行
+        """
+        return []
+
+    def on_task_complete(self, task_id: str, result: Any) -> None:
+        """【IOCP专用】后台任务每次执行完成后的回调。
+
+        可用于：
+        - 根据任务结果触发其他操作（如发送提醒）
+        - 记录任务执行日志
+        - 更新插件内部状态
+
+        Args:
+            task_id: 任务标识
+            result: 任务回调的返回值（None 表示回调无返回）
+        """
+        pass
+
+    # ==================================================================
     #  Graph 扩展 Hook（LangGraph 智能体模式）
     # ==================================================================
 
@@ -173,3 +217,8 @@ class PluginBase:
         os.makedirs(path, exist_ok=True)
         # 返回插件数据目录绝对路径，用于读写配置、缓存文件
         return path
+
+    def get_scheduler(self):
+        """获取IOCP调度器实例（用于插件动态管理后台任务）"""
+        from event_loop import get_scheduler
+        return get_scheduler()
