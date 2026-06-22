@@ -32,6 +32,8 @@ _stop_event = threading.Event()
 _recording_abort = threading.Event()
 # 忙碌锁事件：录音中/AI生成回复/TTS播放时置为True，前端禁用输入按钮防止并发冲突
 _busy_event = threading.Event()
+# 聆听控制事件：默认关闭（静音），需要用户手动开启
+_listening_enabled = threading.Event()  # 默认不 set，即默认静音
 
 
 # ==================================================================
@@ -72,6 +74,13 @@ class MainManager:
         """
         # 第一步打印启动LOGO横幅
         _print_startup_banner()
+
+        # 保存全局事件引用，供插件访问
+        self._listening_enabled = _listening_enabled
+        self._text_input_queue = _text_input_queue
+        self._recording_abort = _recording_abort
+        self._busy_event = _busy_event
+        self._stop_event = _stop_event
 
         # ================================================================
         #  阶段 0: 项目基础信息打印，日志输出环境基础配置
@@ -211,6 +220,7 @@ class MainManager:
     # ==================================================================
     #  主交互循环 — IOCP Agent 模式
     # ==================================================================
+
     def run(self):
         """主交互循环 — IOCP Agent 模式
 
@@ -257,8 +267,16 @@ class MainManager:
                 logger.info("══════════════════════════════════════════════════════════════")
                 logger.info("[输入] 聊天框: %s", user_input)
 
-            # ② 无文字输入，启动VAD录音（在线程池中非阻塞）
+            # ② 无文字输入，检查是否允许聆听
             else:
+                # 检查聆听是否开启
+                listening_status = _listening_enabled.is_set()
+                logger.info("[输入] 检查聆听状态: %s", "开启" if listening_status else "关闭")
+                if not listening_status:
+                    # 聆听已关闭，短暂等待后继续检查
+                    await asyncio.sleep(1)
+                    continue
+
                 logger.info("")
                 logger.info("══════════════════════════════════════════════════════════════")
                 logger.info("  第 %d 轮对话 [语音输入]", self._round_num)

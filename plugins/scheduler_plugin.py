@@ -72,13 +72,17 @@ class SchedulerPlugin(PluginBase):
     name = "scheduler"
     version = "1.0"
 
-    CHECK_INTERVAL = 30  # 每30秒检查一次
+    # 动态间隔策略：根据最近任务时间自动调整检查频率
+    INTERVAL_NORMAL = 120      # 普通间隔：120秒
+    INTERVAL_APPROACHING = 60  # 临近间隔：60秒（任务在5分钟内）
+    INTERVAL_URGENT = 30       # 紧急间隔：30秒（任务在2分钟内）
 
     def __init__(self):
         super().__init__()
         self._tasks: dict[str, Task] = {}
         self._data_dir: Path | None = None
-        self._pending_reminder: str | None = None
+        self._app = None  # 保存 app 引用，用于访问 TTS 和 Live2D
+        self._current_interval = self.INTERVAL_NORMAL  # 当前检查间隔
 
     # ==================================================================
     #  生命周期
@@ -88,23 +92,78 @@ class SchedulerPlugin(PluginBase):
         super().on_startup(app)
         self._data_dir = Path(self.get_data_dir())
         self._load_tasks()
+        self._app = app  # 保存 app 引用，用于访问 TTS 和 Live2D
         logger.info("[scheduler] 日程管理插件已启动，加载 %d 个任务", len(self._tasks))
 
     def on_register_background_tasks(self) -> list[dict]:
         return [
             {
                 "task_id": "check_reminders",
-                "interval": self.CHECK_INTERVAL,
+                "interval": self._current_interval,
                 "callback": self._check_reminders,
-                "description": "检查日程提醒",
+                "description": "检查日程提醒（动态间隔）",
                 "immediate": True,
             }
         ]
 
     def on_task_complete(self, task_id: str, result: Any) -> None:
         if result and isinstance(result, str):
-            self._pending_reminder = result
-            logger.info("[scheduler] 待发送提醒: %s", result)
+            logger.info("[scheduler] 触发语音提醒: %s", result)
+            # 直接播放语音提醒
+            self._play_voice_reminder(result)
+
+    def _play_voice_reminder(self, text: str):
+        """播放语音提醒（在插件内部完成）。"""
+        try:
+            # 获取 TTS 和 Live2D 管理器
+            tts_manager = self._app.tts_manager if hasattr(self._app, 'tts_manager') else None
+            live2d_manager = self._app.live2d_manager if hasattr(self._app, 'live2d_manager') else None
+
+            if not tts_manager:
+                logger.warning("[scheduler] TTS 管理器不可用，跳过语音提醒")
+                return
+
+            # 合成语音
+            logger.info("[scheduler] 合成语音: %s", text[:50])
+            audio_path = tts_manager.synthesize(text)
+
+            if audio_path and live2d_manager:
+                logger.info("[scheduler] 播放语音: %s", audio_path)
+                live2d_manager.play_audio_and_print_mouth(audio_path)
+                logger.info("[scheduler] 语音提醒播放完成")
+            elif audio_path:
+                logger.info("[scheduler] 语音合成完成，但 Live2D 不可用，无法播放")
+            else:
+                logger.warning("[scheduler] TTS 合成失败")
+
+        except Exception as e:
+            logger.error("[scheduler] 语音提醒播放失败: %s", e)
+
+    def _calculate_next_interval(self) -> int:
+        """根据最近任务时间动态计算下一次检查间隔。"""
+        now = datetime.now()
+        min_diff = float('inf')
+
+        # 找到最近的待处理任务
+        for task in self._tasks.values():
+            if task.status != "pending":
+                continue
+            diff = (task.datetime - now).total_seconds()
+            if diff > 0 and diff < min_diff:
+                min_diff = diff
+
+        # 根据最近任务时间动态调整间隔
+        if min_diff <= 120:  # 2分钟内
+            new_interval = self.INTERVAL_URGENT
+            logger.debug("[scheduler] 动态间隔: 任务在 %.0f 秒内，使用 %d 秒间隔", min_diff, new_interval)
+        elif min_diff <= 300:  # 5分钟内
+            new_interval = self.INTERVAL_APPROACHING
+            logger.debug("[scheduler] 动态间隔: 任务在 %.0f 秒内，使用 %d 秒间隔", min_diff, new_interval)
+        else:
+            new_interval = self.INTERVAL_NORMAL
+            logger.debug("[scheduler] 动态间隔: 任务在 %.0f 秒后，使用 %d 秒间隔", min_diff, new_interval)
+
+        return new_interval
 
     def on_llm_context(self, user_input: str) -> str:
         """向LLM注入当前待办任务信息"""
@@ -137,6 +196,7 @@ class SchedulerPlugin(PluginBase):
     def _check_reminders(self) -> str | None:
         """检查是否有到期任务需要提醒（后台任务回调）"""
         now = datetime.now()
+        result = None
 
         for task in list(self._tasks.values()):
             if task.status != "pending" or task.reminder_sent:
@@ -151,14 +211,36 @@ class SchedulerPlugin(PluginBase):
                 if task.description:
                     msg += f"，{task.description}"
                 logger.info("[scheduler] 触发提醒: %s", msg)
-                return msg
+                result = msg
+                break  # 一次只触发一个提醒
 
             # 已过期超过1分钟的任务标记为missed
             if task.datetime < now - timedelta(minutes=1):
                 task.status = "missed"
                 self._save_tasks()
 
-        return None
+        # 动态调整下一次检查间隔
+        self._update_check_interval()
+
+        return result
+
+    def _update_check_interval(self):
+        """根据最近任务时间动态更新检查间隔。"""
+        try:
+            new_interval = self._calculate_next_interval()
+
+            # 只有当间隔变化时才更新
+            if new_interval != self._current_interval:
+                old_interval = self._current_interval
+                self._current_interval = new_interval
+
+                # 使用 IOCP 调度器动态更新间隔
+                scheduler = self.get_scheduler()
+                if scheduler and hasattr(scheduler, 'tasks') and 'scheduler_check_reminders' in scheduler.tasks:
+                    scheduler.tasks['scheduler_check_reminders'].interval = new_interval
+                    logger.info("[scheduler] 动态调整检查间隔: %d秒 → %d秒", old_interval, new_interval)
+        except Exception as e:
+            logger.debug("[scheduler] 更新间隔失败: %s", e)
 
     # ==================================================================
     #  LangGraph 工具注册
