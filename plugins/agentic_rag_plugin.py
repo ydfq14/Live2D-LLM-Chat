@@ -307,30 +307,321 @@ class AgenticRAGPlugin(PluginBase):
                 logger.warning("[agentic_rag] 关闭连接失败: %s", e)
             self._kb = None
 
+    # ==================================================================
+    #  文件上传 API（供前端调用）
+    # ==================================================================
+
+    def upload_file(self, file_path: str, summary: str = "") -> str:
+        """上传并索引文件到知识库。
+
+        Args:
+            file_path: 文件路径
+            summary: 文件摘要（可选）
+
+        Returns:
+            JSON 格式的处理结果
+        """
+        if not self._kb:
+            return json.dumps({"success": False, "error": "知识库未初始化"})
+
+        try:
+            from kb_controller import IngestionPipeline
+            import os
+
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                return json.dumps({"success": False, "error": f"文件不存在: {file_path}"})
+
+            # 检查文件类型
+            supported_types = {'.txt', '.md', '.pdf', '.json', '.csv'}
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext not in supported_types:
+                return json.dumps({
+                    "success": False,
+                    "error": f"不支持的文件类型: {file_ext}，支持: {', '.join(supported_types)}"
+                })
+
+            # 创建 IngestionPipeline 并摄入文件
+            pipeline = IngestionPipeline(self._kb)
+            file_id = pipeline.ingest_file(file_path, summary=summary)
+
+            if file_id > 0:
+                # 更新统计
+                self._update_stats()
+                logger.info("[agentic_rag] 文件上传成功: %s (ID=%d)", os.path.basename(file_path), file_id)
+                return json.dumps({
+                    "success": True,
+                    "file_id": file_id,
+                    "filename": os.path.basename(file_path),
+                    "message": f"文件已成功索引，ID={file_id}"
+                })
+            else:
+                return json.dumps({"success": False, "error": "文件索引失败，可能是文件内容为空"})
+
+        except Exception as e:
+            logger.error("[agentic_rag] 文件上传失败: %s", e)
+            return json.dumps({"success": False, "error": str(e)})
+
+    def get_file_list(self) -> str:
+        """获取知识库文件列表（供前端显示）。"""
+        if not self._kb:
+            return json.dumps({"files": [], "error": "知识库未初始化"})
+
+        try:
+            files = self._kb.listFilesPaginated(self._kb_id, page=1, pageSize=100)
+            file_list = [
+                {
+                    "id": f.get("id"),
+                    "filename": f.get("filename", "未知"),
+                    "chunk_count": f.get("chunk_count", 0),
+                    "status": f.get("status", "unknown")
+                }
+                for f in files
+                if f.get("status") == "done"
+            ]
+            return json.dumps({"files": file_list})
+        except Exception as e:
+            logger.error("[agentic_rag] 获取文件列表失败: %s", e)
+            return json.dumps({"files": [], "error": str(e)})
+
+    def delete_file(self, file_id: str) -> str:
+        """从知识库删除指定文件。
+
+        Args:
+            file_id: 文件 ID（字符串，前端传入）
+
+        Returns:
+            JSON 格式的处理结果
+        """
+        if not self._kb:
+            return json.dumps({"success": False, "error": "知识库未初始化"})
+
+        try:
+            fid = int(file_id)
+            # 获取文件信息（用于日志）
+            files = self._kb.listFilesPaginated(self._kb_id, page=1, pageSize=10000)
+            target_file = next((f for f in files if f.get("id") == fid), None)
+
+            if not target_file:
+                return json.dumps({"success": False, "error": f"文件 ID={fid} 不存在"})
+
+            filename = target_file.get("filename", "未知")
+
+            # 删除文件
+            self._kb.delete_file(fid)
+
+            # 更新统计
+            self._update_stats()
+
+            logger.info("[agentic_rag] 文件已删除: %s (ID=%d)", filename, fid)
+            return json.dumps({
+                "success": True,
+                "message": f"文件 '{filename}' 已删除",
+                "file_id": fid
+            })
+
+        except ValueError:
+            return json.dumps({"success": False, "error": f"无效的文件 ID: {file_id}"})
+        except Exception as e:
+            logger.error("[agentic_rag] 删除文件失败: %s", e)
+            return json.dumps({"success": False, "error": str(e)})
+
     def get_frontend_html(self) -> str:
-        """返回知识库状态面板。"""
+        """返回知识库状态面板（含文件上传功能）。"""
         status = "已连接" if self._kb else "未连接"
         agent_status = "已缓存" if self._agent else "待创建"
         return f"""
+        <style>
+            .kb-section {{ margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }}
+            .kb-btn {{
+                padding: 8px 16px; border: none; border-radius: 6px;
+                background: #e94560; color: #fff; font-size: 12px;
+                cursor: pointer; transition: background 0.2s;
+            }}
+            .kb-btn:hover {{ background: #c73e54; }}
+            .kb-btn:disabled {{ background: #555; cursor: not-allowed; }}
+            .kb-file-list {{ max-height: 200px; overflow-y: auto; margin-top: 8px; }}
+            .kb-file-item {{
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 6px 8px; background: rgba(255,255,255,0.05);
+                border-radius: 4px; margin-bottom: 4px; font-size: 12px;
+            }}
+            .kb-file-name {{ color: #eee; flex: 1; }}
+            .kb-file-chunks {{ color: #888; font-size: 11px; margin-right: 8px; }}
+            .kb-file-delete {{
+                padding: 2px 8px; border: 1px solid #e94560; border-radius: 4px;
+                background: transparent; color: #e94560; font-size: 11px;
+                cursor: pointer; transition: all 0.2s;
+            }}
+            .kb-file-delete:hover {{ background: #e94560; color: #fff; }}
+            .kb-upload-area {{
+                border: 2px dashed rgba(255,255,255,0.2); border-radius: 8px;
+                padding: 20px; text-align: center; margin-top: 12px;
+                cursor: pointer; transition: border-color 0.2s;
+            }}
+            .kb-upload-area:hover {{ border-color: #e94560; }}
+            .kb-upload-area.dragover {{ border-color: #e94560; background: rgba(233,69,96,0.1); }}
+            #kbFileInput {{ display: none; }}
+        </style>
+
         <div style="padding:12px; color:#eee; font-family:system-ui,sans-serif">
             <h3 style="color:#e94560; margin-bottom:12px">📚 知识库 (Agentic RAG)</h3>
-            <p style="color:#aaa; font-size:13px">
-                知识库状态：{status}<br>
-                文件数：{self._file_count}<br>
-                片段数：{self._chunk_count}
-            </p>
-            <p style="color:#aaa; font-size:13px; margin-top:8px">
-                工具：<code>ask_knowledge_base</code><br>
-                Agent 模型：{self._agent_model}<br>
-                Agent 状态：{agent_status}
-            </p>
-            <p style="color:#aaa; font-size:13px; margin-top:8px">
-                流程：查询改写 → 双通道检索 → RRF 融合 → 精读 → 自我反思 → 生成答案
-            </p>
-            <p style="color:#aaa; font-size:12px; margin-top:12px">
-                向知识库中放入文档（txt/pdf/md），即可自动索引。
-            </p>
+
+            <div class="kb-section">
+                <p style="color:#aaa; font-size:13px">
+                    知识库状态：{status}<br>
+                    文件数：{self._file_count}<br>
+                    片段数：{self._chunk_count}
+                </p>
+                <p style="color:#aaa; font-size:13px; margin-top:8px">
+                    工具：<code>ask_knowledge_base</code><br>
+                    Agent 模型：{self._agent_model}<br>
+                    Agent 状态：{agent_status}
+                </p>
+                <p style="color:#aaa; font-size:13px; margin-top:8px">
+                    流程：查询改写 → 双通道检索 → RRF 融合 → 精读 → 自我反思 → 生成答案
+                </p>
+            </div>
+
+            <div class="kb-section">
+                <button class="kb-btn" onclick="kbRefreshFiles()">🔄 刷新文件列表</button>
+                <div id="kbFileList" class="kb-file-list">
+                    <p style="color:#555; font-size:12px">点击刷新加载文件列表</p>
+                </div>
+            </div>
+
+            <div class="kb-section">
+                <p style="color:#aaa; font-size:12px; margin-bottom:8px">上传文件到知识库（支持 txt/md/pdf/json/csv）</p>
+                <div class="kb-upload-area" id="kbUploadArea" onclick="document.getElementById('kbFileInput').click()">
+                    <p style="color:#888; font-size:13px; margin:0">📁 点击选择文件或拖拽文件到此处</p>
+                    <p style="color:#555; font-size:11px; margin:4px 0 0 0">支持 .txt .md .pdf .json .csv</p>
+                </div>
+                <input type="file" id="kbFileInput" accept=".txt,.md,.pdf,.json,.csv" onchange="kbUploadFile(this)">
+                <div id="kbUploadStatus" style="margin-top:8px; font-size:12px; color:#aaa"></div>
+            </div>
         </div>
+
+        <script>
+            // 刷新文件列表
+            function kbRefreshFiles() {{
+                pywebview.api.call_plugin('agentic_rag', 'get_file_list').then(function(raw) {{
+                    var data = JSON.parse(raw);
+                    var el = document.getElementById('kbFileList');
+                    if (data.error) {{
+                        el.innerHTML = '<p style="color:#e94560; font-size:12px">' + data.error + '</p>';
+                        return;
+                    }}
+                    if (!data.files || data.files.length === 0) {{
+                        el.innerHTML = '<p style="color:#555; font-size:12px">知识库暂无文件</p>';
+                        return;
+                    }}
+                    var html = '';
+                    for (var i = 0; i < data.files.length; i++) {{
+                        var f = data.files[i];
+                        html += '<div class="kb-file-item">';
+                        html += '<span class="kb-file-name">📄 ' + f.filename + '</span>';
+                        html += '<span class="kb-file-chunks">' + f.chunk_count + ' 片段</span>';
+                        html += '<button class="kb-file-delete" onclick="kbDeleteFile(' + f.id + ', \'' + f.filename.replace(/'/g, "\\'") + '\')">删除</button>';
+                        html += '</div>';
+                    }}
+                    el.innerHTML = html;
+                }}).catch(function(e) {{
+                    console.error(e);
+                }});
+            }}
+
+            // 删除文件
+            function kbDeleteFile(fileId, filename) {{
+                if (!confirm('确定要删除文件 "' + filename + '" 吗？\\n删除后无法恢复。')) {{
+                    return;
+                }}
+
+                var statusEl = document.getElementById('kbUploadStatus');
+                statusEl.innerHTML = '⏳ 正在删除: ' + filename + '...';
+                statusEl.style.color = '#aaa';
+
+                pywebview.api.call_plugin('agentic_rag', 'delete_file', String(fileId)).then(function(raw) {{
+                    var data = JSON.parse(raw);
+                    if (data.success) {{
+                        statusEl.innerHTML = '✅ ' + data.message;
+                        statusEl.style.color = '#4a9';
+                        kbRefreshFiles();  // 刷新文件列表
+                    }} else {{
+                        statusEl.innerHTML = '❌ ' + data.error;
+                        statusEl.style.color = '#e94560';
+                    }}
+                }}).catch(function(e) {{
+                    statusEl.innerHTML = '❌ 删除失败: ' + e.message;
+                    statusEl.style.color = '#e94560';
+                    console.error(e);
+                }});
+            }}
+
+            // 上传文件
+            function kbUploadFile(input) {{
+                var file = input.files[0];
+                if (!file) return;
+
+                var statusEl = document.getElementById('kbUploadStatus');
+                statusEl.innerHTML = '⏳ 正在上传: ' + file.name + '...';
+                statusEl.style.color = '#aaa';
+
+                // 使用 pywebview 的文件选择 API
+                pywebview.api.select_file(file.name).then(function(filePath) {{
+                    if (!filePath) {{
+                        statusEl.innerHTML = '❌ 未选择文件';
+                        statusEl.style.color = '#e94560';
+                        return;
+                    }}
+
+                    return pywebview.api.call_plugin('agentic_rag', 'upload_file', filePath, '');
+                }}).then(function(raw) {{
+                    if (!raw) return;
+                    var data = JSON.parse(raw);
+                    if (data.success) {{
+                        statusEl.innerHTML = '✅ ' + data.message;
+                        statusEl.style.color = '#4a9';
+                        kbRefreshFiles();  // 刷新文件列表
+                    }} else {{
+                        statusEl.innerHTML = '❌ ' + data.error;
+                        statusEl.style.color = '#e94560';
+                    }}
+                }}).catch(function(e) {{
+                    statusEl.innerHTML = '❌ 上传失败: ' + e.message;
+                    statusEl.style.color = '#e94560';
+                    console.error(e);
+                }});
+
+                // 清空 input
+                input.value = '';
+            }}
+
+            // 拖拽上传
+            var uploadArea = document.getElementById('kbUploadArea');
+            uploadArea.addEventListener('dragover', function(e) {{
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            }});
+            uploadArea.addEventListener('dragleave', function(e) {{
+                uploadArea.classList.remove('dragover');
+            }});
+            uploadArea.addEventListener('drop', function(e) {{
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                var file = e.dataTransfer.files[0];
+                if (file) {{
+                    // 触发上传
+                    var input = document.getElementById('kbFileInput');
+                    var dt = new DataTransfer();
+                    dt.items.add(file);
+                    input.files = dt.files;
+                    kbUploadFile(input);
+                }}
+            }});
+
+            // 初始加载文件列表
+            kbRefreshFiles();
+        </script>
         """
 
     # ================================================================

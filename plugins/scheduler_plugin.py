@@ -554,6 +554,9 @@ class SchedulerPlugin(PluginBase):
         <input id="schTime" type="datetime-local" />
         <button onclick="schAdd()">添加</button>
     </div>
+    <div class="scheduler-add-row" style="margin-top: 6px;">
+        <input id="schDesc" type="text" placeholder="任务内容（可选）" style="flex: 1;" />
+    </div>
 </div>
 <script>
 function schRefresh() {
@@ -571,10 +574,19 @@ function schRefresh() {
         for (var i = 0; i < lines.length; i++) {
             var m = lines[i].match(/- \[(\w+)\]\s+(\S+)\s+(.*)/);
             if (m) {
+                var taskInfo = m[3];
+                // 检查是否有任务描述（格式：标题（描述））
+                var descMatch = taskInfo.match(/^(.+?)（(.+?)）$/);
+                var title = descMatch ? descMatch[1] : taskInfo;
+                var desc = descMatch ? descMatch[2] : '';
+
                 html += '<div class="scheduler-item"><div class="scheduler-item-info">'
                     + '<div class="scheduler-item-time">' + m[2] + '</div>'
-                    + '<div class="scheduler-item-title">' + m[3] + '</div></div>'
-                    + '<div class="scheduler-item-actions">'
+                    + '<div class="scheduler-item-title">' + title + '</div>';
+                if (desc) {
+                    html += '<div style="color:#888; font-size:11px; margin-top:2px;">' + desc + '</div>';
+                }
+                html += '</div><div class="scheduler-item-actions">'
                     + '<button onclick="schDone(\'' + m[1] + '\')">完成</button></div></div>';
             }
         }
@@ -584,11 +596,13 @@ function schRefresh() {
 function schAdd() {
     var title = document.getElementById('schTitle').value.trim();
     var time = document.getElementById('schTime').value;
+    var desc = document.getElementById('schDesc').value.trim();
     if (!title || !time) return;
     var dt = time.replace('T', ' ');
-    pywebview.api.call_plugin('scheduler', '_add_task', title, dt, '').then(function() {
+    pywebview.api.call_plugin('scheduler', '_add_task', title, dt, desc).then(function() {
         document.getElementById('schTitle').value = '';
         document.getElementById('schTime').value = '';
+        document.getElementById('schDesc').value = '';
         schRefresh();
     });
 }

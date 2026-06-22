@@ -271,7 +271,6 @@ class MainManager:
             else:
                 # 检查聆听是否开启
                 listening_status = _listening_enabled.is_set()
-                logger.info("[输入] 检查聆听状态: %s", "开启" if listening_status else "关闭")
                 if not listening_status:
                     # 聆听已关闭，短暂等待后继续检查
                     await asyncio.sleep(1)
