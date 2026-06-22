@@ -42,6 +42,12 @@ class Config:
     MIMO_API_KEY = os.getenv("MIMO_API_KEY", "")
     MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"  # 按量付费；Token Plan 用 https://token-plan-cn.xiaomimimo.com/v1
 
+    # ==================== Agentic RAG LLM 配置 ====================
+    # 用于知识库智能检索的独立 LLM Agent（默认复用 MIMO 配置）
+    AGENTIC_RAG_LLM_MODEL = os.getenv("AGENTIC_RAG_LLM_MODEL", "mimo-v2.5-pro")
+    AGENTIC_RAG_LLM_BASE_URL = os.getenv("AGENTIC_RAG_LLM_BASE_URL", MIMO_BASE_URL)
+    AGENTIC_RAG_LLM_API_KEY = os.getenv("AGENTIC_RAG_LLM_API_KEY", MIMO_API_KEY)
+
     # 云端 ASR（MiMo-V2.5-ASR）
     MIMO_ASR_MODEL = "mimo-v2.5-asr"
     MIMO_ASR_LANGUAGE = "auto"  # "auto" | "zh" | "en"
