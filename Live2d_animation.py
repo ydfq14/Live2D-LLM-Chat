@@ -61,6 +61,16 @@ class Live2DAnimationManager:
         # 渲染循环运行总开关，True持续渲染，False退出循环
         self.running = True
 
+        # ===================== 窗口拖动相关参数初始化 =====================
+        # 是否正在拖动窗口（右键按住拖动）
+        self._dragging = False
+        # 拖动开始时的鼠标屏幕全局坐标
+        self._drag_start_mouse = (0, 0)
+        # 拖动开始时的窗口左上角屏幕坐标
+        self._drag_start_win = (0, 0)
+        # 当前是否处于可拖动模式（移除鼠标穿透）
+        self._drag_mode = False
+
         # ===================== 鼠标跟随相关参数初始化 =====================
         # 获取程序启动时初始鼠标坐标，记录上一帧鼠标位置
         self.last_mouse_x, self.last_mouse_y = pyautogui.position()
@@ -113,6 +123,93 @@ class Live2DAnimationManager:
         # 设置窗口位置：贴屏幕底部，左上角坐标(0, 屏幕高度-窗口高度)
         glfw.set_window_pos(window, 0, screen_height - height)
 
+    # 启用拖动模式：移除鼠标穿透样式，窗口可接收鼠标事件
+    def _enable_drag_mode(self):
+        """移除 WS_EX_TRANSPARENT，让窗口接管鼠标事件以实现拖动"""
+        if self._drag_mode:
+            return
+        hwnd = glfw.get_win32_window(self.window)
+        get_window_long = ctypes.windll.user32.GetWindowLongW
+        set_window_long = ctypes.windll.user32.SetWindowLongW
+        ex_style = get_window_long(hwnd, GWL_EXSTYLE)
+        # 去除鼠标穿透标志，保留分层透明标志
+        ex_style &= ~WS_EX_TRANSPARENT
+        set_window_long(hwnd, GWL_EXSTYLE, ex_style)
+        self._drag_mode = True
+        logger.debug("拖动模式已启用（已移除鼠标穿透）")
+
+    # 恢复穿透模式：重新添加鼠标穿透样式，鼠标事件穿透到桌面
+    def _disable_drag_mode(self):
+        """还原 WS_EX_TRANSPARENT，恢复鼠标穿透桌面"""
+        if not self._drag_mode:
+            return
+        hwnd = glfw.get_win32_window(self.window)
+        get_window_long = ctypes.windll.user32.GetWindowLongW
+        set_window_long = ctypes.windll.user32.SetWindowLongW
+        ex_style = get_window_long(hwnd, GWL_EXSTYLE)
+        # 重新叠加鼠标穿透标志
+        ex_style |= WS_EX_TRANSPARENT
+        set_window_long(hwnd, GWL_EXSTYLE, ex_style)
+        self._drag_mode = False
+        logger.debug("穿透模式已恢复（已启用鼠标穿透）")
+
+    # GLFW 鼠标按键回调：右键按下启动拖动，右键松开停止拖动
+    def _on_mouse_button(self, window, button, action, mods):
+        """
+        GLFW 鼠标按键事件回调
+        - 右键按下 (MOUSE_BUTTON_RIGHT + PRESS)：记录拖动起点，进入拖动状态
+        - 右键松开 (MOUSE_BUTTON_RIGHT + RELEASE)：退出拖动，恢复穿透
+        """
+        if button == glfw.MOUSE_BUTTON_RIGHT:
+            if action == glfw.PRESS:
+                # 记录按下时鼠标的屏幕全局坐标
+                mx, my = pyautogui.position()
+                # 记录按下时窗口的屏幕坐标
+                wx, wy = glfw.get_window_pos(window)
+                self._drag_start_mouse = (mx, my)
+                self._drag_start_win = (wx, wy)
+                self._dragging = True
+                logger.debug(f"开始拖动 — 鼠标起点=({mx},{my})，窗口起点=({wx},{wy})")
+            elif action == glfw.RELEASE:
+                self._dragging = False
+                # 拖动结束后恢复鼠标穿透，避免遮挡桌面操作
+                self._disable_drag_mode()
+                logger.debug("停止拖动，恢复穿透模式")
+
+    # GLFW 鼠标移动回调：拖动中实时更新窗口位置
+    def _on_cursor_pos(self, window, xpos, ypos):
+        """
+        GLFW 鼠标移动事件回调
+        拖动模式下：计算鼠标位移量，等比移动窗口位置
+        """
+        if self._dragging:
+            # 获取当前鼠标屏幕全局坐标
+            mx, my = pyautogui.position()
+            # 计算相对于拖动起点的位移量
+            dx = mx - self._drag_start_mouse[0]
+            dy = my - self._drag_start_mouse[1]
+            # 计算新窗口位置 = 拖动起点窗口位置 + 位移量
+            new_x = self._drag_start_win[0] + dx
+            new_y = self._drag_start_win[1] + dy
+            # 移动 GLFW 窗口到新坐标
+            glfw.set_window_pos(window, new_x, new_y)
+
+    # GLFW 键盘回调：按住 Ctrl 键切换拖动模式
+    def _on_key(self, window, key, scancode, action, mods):
+        """
+        GLFW 键盘事件回调
+        - 按下 Ctrl：启用拖动模式（移除穿透，此后右键可拖动窗口）
+        - 松开 Ctrl 且未在拖动：恢复穿透模式
+        """
+        if key == glfw.KEY_LEFT_CONTROL or key == glfw.KEY_RIGHT_CONTROL:
+            if action == glfw.PRESS:
+                self._enable_drag_mode()
+                logger.debug("Ctrl 按下，拖动模式就绪（右键拖拽窗口）")
+            elif action == glfw.RELEASE:
+                # 只有未在拖动状态时才立即恢复穿透，避免拖动中断
+                if not self._dragging:
+                    self._disable_drag_mode()
+
     # 根据路径加载Live2D模型并适配窗口尺寸
     def load_live2d_model(self, width, height):
         """
@@ -161,6 +258,16 @@ class Live2DAnimationManager:
 
         # 调用自定义方法配置窗口透明、鼠标穿透、底部贴边
         self.configure_window(self.window, window_width, window_height)
+
+        # ===== 注册拖动相关 GLFW 事件回调 =====
+        # 注册鼠标按键回调（右键按下/松开控制拖动）
+        glfw.set_mouse_button_callback(self.window, self._on_mouse_button)
+        # 注册鼠标移动回调（拖动中实时更新窗口位置）
+        glfw.set_cursor_pos_callback(self.window, self._on_cursor_pos)
+        # 注册键盘回调（按 Ctrl 进入/退出拖动模式）
+        glfw.set_key_callback(self.window, self._on_key)
+        logger.info("💡 提示：按住 Ctrl 键启用拖动模式，然后右键拖拽可移动窗口")
+        # ===== 回调注册完成 =====
         # Live2D专用OpenGL函数初始化，绑定底层渲染接口
         glInit()
 
