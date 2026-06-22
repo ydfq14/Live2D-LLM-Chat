@@ -87,6 +87,18 @@ class Config:
     WEBUI_HISTORY_DIR = os.path.join(PROJECT_ROOT, "TTS_env/voice_history/")
     WEBUI_MODEL_DIR = os.path.join(PROJECT_ROOT, "TTS_env/CosyVoice/pretrained_models/CosyVoice2-0.5B")
 
+    # ==================== IOCP 配置 ====================
+    # IOCP工作线程数（0=自动，通常为 CPU核心数 * 2）
+    IOCP_MAX_WORKERS = int(os.getenv("IOCP_MAX_WORKERS", "0"))
+
+    # 后台任务检查间隔（秒）
+    # 影响日程提醒等后台任务的检查频率
+    IOCP_TASK_CHECK_INTERVAL = float(os.getenv("IOCP_TASK_CHECK_INTERVAL", "1.0"))
+
+    # 异步包装器配置
+    # 同步代码（ASR/TTS/Live2D）在线程池中的超时时间（秒）
+    ASYNC_WRAPPER_TIMEOUT = float(os.getenv("ASYNC_WRAPPER_TIMEOUT", "30.0"))
+
 # 可用于打印检查配置
 if __name__ == "__main__":
     for attr in dir(Config):

@@ -59,15 +59,33 @@ if _sys.platform == "win32":
     _os.rename = _windows_rename
 
 # ===================== 默认配置 =====================
-DEFAULT_MILVUS_URI = "./milvus_data/kb.db"
+DEFAULT_MILVUS_URI = "./plugins_data/agentic_rag/kb.db"
 DEFAULT_COLLECTION = "kb_chunks"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
-DEFAULT_LOCAL_EMBEDDING_DIR = "D:/Models/bge-m3"
-DEFAULT_BM25_CACHE_PATH = "./milvus_data/bm25_cache.pkl"
+DEFAULT_BM25_CACHE_PATH = "./plugins_data/agentic_rag/bm25_cache.pkl"
 EMBEDDING_DIM = 1024
 DEFAULT_CHUNK_SIZE = 500
 DEFAULT_CHUNK_OVERLAP = 50
 MAX_VARCHAR_LEN = 65535
+
+def _get_model_cache_dir() -> str:
+    """获取模型缓存目录，遵循项目约定使用 .models/ 目录。"""
+    # 优先使用环境变量（由 bootstrap 设置）
+    modelscope_cache = os.environ.get("MODELSCOPE_CACHE")
+    if modelscope_cache:
+        return modelscope_cache
+    # 回退到项目约定的 .models/modelscope 目录
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".models", "modelscope")
+
+
+def _get_sentence_transformers_cache_dir() -> str:
+    """获取 sentence-transformers 缓存目录，遵循项目约定。"""
+    # 优先使用环境变量（由 bootstrap 设置）
+    st_cache = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
+    if st_cache:
+        return st_cache
+    # 回退到项目约定的 .models/sentence_transformers 目录
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".models", "sentence_transformers")
 
 
 # =====================================================================
@@ -79,18 +97,18 @@ class EmbeddingManager:
     def __init__(
         self,
         model_name: str = DEFAULT_EMBEDDING_MODEL,
-        local_dir: Optional[str] = DEFAULT_LOCAL_EMBEDDING_DIR,
+        local_dir: Optional[str] = None,
     ):
         self._model_name = model_name
-        self._local_dir = local_dir
+        self._local_dir = local_dir or _get_sentence_transformers_cache_dir()
         self._model = None
 
     def _download_from_modelscope(self) -> str:
-        """从魔塔社区下载模型到本地目录。"""
+        """从魔塔社区下载模型到本地目录（遵循项目约定）。"""
         try:
             from modelscope import snapshot_download
 
-            cache_dir = str(Path(self._local_dir).parent) if self._local_dir else "D:/Models"
+            cache_dir = _get_model_cache_dir()
             log.info("本地模型目录不存在，从魔塔社区下载 %s 到 %s ...", self._model_name, cache_dir)
             model_dir = snapshot_download(self._model_name, cache_dir=cache_dir)
             log.info("模型下载完成: %s", model_dir)
@@ -245,7 +263,7 @@ class MilvusLiteKBController:
         milvus_uri: str = DEFAULT_MILVUS_URI,
         collection_name: str = DEFAULT_COLLECTION,
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
-        local_embedding_dir: Optional[str] = DEFAULT_LOCAL_EMBEDDING_DIR,
+        local_embedding_dir: Optional[str] = None,
         bm25_cache_path: Optional[str] = DEFAULT_BM25_CACHE_PATH,
     ):
         self._milvus_uri = milvus_uri
