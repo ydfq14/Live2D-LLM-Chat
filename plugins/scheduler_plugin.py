@@ -34,6 +34,8 @@ class Task:
         self.created_at = datetime.now()
         self.completed_at = None
         self.reminder_sent = False
+        self.last_reminder_time = None  # 上次提醒时间
+        self.reminder_count = 0  # 提醒次数
 
     def to_dict(self) -> dict:
         return {
@@ -45,6 +47,8 @@ class Task:
             "created_at": self.created_at.isoformat(),
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "reminder_sent": self.reminder_sent,
+            "last_reminder_time": self.last_reminder_time.isoformat() if self.last_reminder_time else None,
+            "reminder_count": self.reminder_count,
         }
 
     @classmethod
@@ -63,7 +67,32 @@ class Task:
             else None
         )
         task.reminder_sent = data.get("reminder_sent", False)
+        task.last_reminder_time = (
+            datetime.fromisoformat(data["last_reminder_time"])
+            if data.get("last_reminder_time")
+            else None
+        )
+        task.reminder_count = data.get("reminder_count", 0)
         return task
+
+    def should_remind(self) -> bool:
+        """判断是否应该提醒（每5分钟提醒一次，直到完成）。"""
+        if self.status != "pending":
+            return False
+
+        now = datetime.now()
+
+        # 任务时间还没到
+        if now < self.datetime:
+            return False
+
+        # 第一次提醒（任务时间到了）
+        if self.last_reminder_time is None:
+            return True
+
+        # 距离上次提醒超过5分钟
+        time_since_last = (now - self.last_reminder_time).total_seconds()
+        return time_since_last >= 300  # 5分钟 = 300秒
 
 
 class SchedulerPlugin(PluginBase):
@@ -199,23 +228,24 @@ class SchedulerPlugin(PluginBase):
         result = None
 
         for task in list(self._tasks.values()):
-            if task.status != "pending" or task.reminder_sent:
-                continue
-
-            # 在任务时间前后1分钟内
-            time_diff = abs((task.datetime - now).total_seconds())
-            if time_diff < 60:
+            if task.should_remind():
+                # 更新提醒状态
+                task.last_reminder_time = now
                 task.reminder_sent = True
+                task.reminder_count += 1
                 self._save_tasks()
-                msg = f"提醒：{task.title}"
-                if task.description:
-                    msg += f"，{task.description}"
-                logger.info("[scheduler] 触发提醒: %s", msg)
-                result = msg
+
+                # 生成提醒消息
+                raw_msg = self._generate_reminder_message(task)
+                logger.info("[scheduler] 触发提醒 (第%d次): %s", task.reminder_count, raw_msg)
+
+                # 使用 LLM 润色提醒内容
+                polished_msg = self._polish_reminder(raw_msg, task)
+                result = polished_msg
                 break  # 一次只触发一个提醒
 
-            # 已过期超过1分钟的任务标记为missed
-            if task.datetime < now - timedelta(minutes=1):
+            # 已过期超过1小时且未完成的任务标记为missed
+            if task.status == "pending" and task.datetime < now - timedelta(hours=1):
                 task.status = "missed"
                 self._save_tasks()
 
@@ -223,6 +253,49 @@ class SchedulerPlugin(PluginBase):
         self._update_check_interval()
 
         return result
+
+    def _generate_reminder_message(self, task: Task) -> str:
+        """生成原始提醒消息。"""
+        time_str = task.datetime.strftime("%H:%M")
+        msg = f"提醒：现在是{time_str}，{task.title}"
+        if task.description:
+            msg += f"，{task.description}"
+        if task.reminder_count > 1:
+            msg += f"（这是第{task.reminder_count}次提醒，任务尚未完成）"
+        return msg
+
+    def _polish_reminder(self, raw_msg: str, task: Task) -> str:
+        """使用 LLM 润色提醒内容，使其更自然亲切。"""
+        try:
+            # 尝试使用 app 的 LLM 进行润色
+            if hasattr(self._app, 'llm_manager') and self._app.llm_manager:
+                llm = self._app.llm_manager
+
+                # 构建润色提示
+                polish_prompt = f"""请将以下日程提醒内容润色为自然、亲切、口语化的语音提醒，适合用语音播报。
+要求：
+1. 语气友好、温暖
+2. 简洁明了，不超过2句话
+3. 如果是重复提醒，语气要更关切但不要啰嗦
+4. 直接输出润色后的内容，不要解释
+
+原始提醒内容：{raw_msg}"""
+
+                # 调用 LLM 润色
+                polished = llm.model_chat_completion([
+                    {"role": "system", "content": "你是一个贴心的语音助手，负责将日程提醒润色为自然亲切的语音内容。"},
+                    {"role": "user", "content": polish_prompt}
+                ])
+
+                if polished and len(polished) > 5:
+                    logger.info("[scheduler] LLM 润色完成: %s", polished[:50])
+                    return polished
+
+        except Exception as e:
+            logger.warning("[scheduler] LLM 润色失败，使用原始内容: %s", e)
+
+        # 如果润色失败，返回原始消息
+        return raw_msg
 
     def _update_check_interval(self):
         """根据最近任务时间动态更新检查间隔。"""
