@@ -1,0 +1,226 @@
+{
+  "schema_version": "1.0",
+  "description": "VirtuMate 内容安全拦截规则库（Guardrails Knowledge Base）",
+  "last_updated": "2026-06-17",
+  "maintainer": "RAG Engineer",
+  "rules": [
+    {
+      "id": "safe-001",
+      "level": "high",
+      "category": "suicide_selfharm",
+      "description": "用户表达自杀意图、自残计划或严重厌世情绪",
+      "indicators": {
+        "keywords": [
+          "自杀", "想死", "不想活了", "活着没意思", "结束生命", "跳楼",
+          "割腕", "跳河", "上吊", "安眠药", "轻生", "厌世", "没意义",
+          "活着痛苦", "死了算了", "不想活", "想不开", "活够了", "自残",
+          "伤害自己", "结束这一切", "消失", "离开这个世界"
+        ],
+        "semantic_hints": [
+          "结束生命的方法", "如何 painless 死亡", "不想继续活着",
+          "感觉没有活下去的理由", "计划结束自己"
+        ]
+      },
+      "response": {
+        "action": "intercept",
+        "template": "我注意到你现在可能很痛苦。请相信，你并不孤单，很多人都在关心你。\n\n如果你需要专业的支持，可以拨打：\n{{resources}}\n\n我在这儿陪着你，但心理咨询师能给你更好的帮助。你愿意试着联系一下吗？",
+        "resources": [
+          {"name": "心理援助热线", "number": "400-161-9995", "hours": "24小时"},
+          {"name": "北京危机干预热线", "number": "010-82951332", "hours": "24小时"},
+          {"name": "生命热线", "number": "400-821-1215", "hours": "24小时"}
+        ]
+      },
+      "metadata": {
+        "log_required": true,
+        "store_to_memory": false,
+        "escalation": "care_team"
+      }
+    },
+    {
+      "id": "safe-002",
+      "level": "high",
+      "category": "violence_crime",
+      "description": "用户涉及暴力、犯罪或违法行为的询问或陈述",
+      "indicators": {
+        "keywords": [
+          "杀人", "怎么杀人", "杀了他", "武器", "炸弹", "爆炸物",
+          "抢劫", "敲诈", "勒索", "绑架", "拐卖", "强奸", "性骚扰",
+          "虐待", "家暴", "殴打", "恐怖袭击", "制造武器"
+        ],
+        "semantic_hints": [
+          "如何实施犯罪", "逃避法律的方法", "伤害他人的技巧",
+          "非法获取武器", "策划暴力事件"
+        ]
+      },
+      "response": {
+        "action": "intercept",
+        "template": "这个话题我不能参与讨论。如果你或他人正处于危险中，请立即拨打：\n{{resources}}\n\n如果有什么其他我可以帮你的，我在这里。",
+        "resources": [
+          {"name": "报警电话", "number": "110", "hours": "24小时"},
+          {"name": "急救电话", "number": "120", "hours": "24小时"}
+        ]
+      },
+      "metadata": {
+        "log_required": true,
+        "store_to_memory": false,
+        "escalation": "security"
+      }
+    },
+    {
+      "id": "safe-003",
+      "level": "high",
+      "category": "csam",
+      "description": "涉及未成年人色情内容或性剥削",
+      "indicators": {
+        "keywords": [
+          "未成年色情", "儿童色情", "幼女", "萝莉控", "恋童",
+          "小孩色情", "儿童性爱", "未成年性"
+        ],
+        "semantic_hints": [
+          "儿童性内容", "未成年性图片", "儿童性剥削"
+        ]
+      },
+      "response": {
+        "action": "intercept",
+        "template": "这个话题我不能讨论。如果你或他人涉及儿童安全问题，请拨打：\n{{resources}}\n\n我在这儿，如果你需要其他帮助。",
+        "resources": [
+          {"name": "报警电话", "number": "110", "hours": "24小时"},
+          {"name": "全国反拐热线", "number": "010-84039270", "hours": "工作日"}
+        ]
+      },
+      "metadata": {
+        "log_required": true,
+        "store_to_memory": false,
+        "escalation": "legal"
+      }
+    },
+    {
+      "id": "safe-004",
+      "level": "high",
+      "category": "drugs",
+      "description": "涉及毒品获取、使用或药物滥用",
+      "indicators": {
+        "keywords": [
+          "冰毒", "海洛因", "吸毒", "毒品获取", "大麻", "可卡因",
+          "嗑药", "药物滥用", "贩毒", "制毒"
+        ],
+        "semantic_hints": [
+          "如何获取毒品", "吸毒的体验", "制作毒品的方法"
+        ]
+      },
+      "response": {
+        "action": "intercept",
+        "template": "毒品有害健康，这个话题我不能讨论。如果你需要帮助，可以拨打：\n{{resources}}",
+        "resources": [
+          {"name": "禁毒热线", "number": "12320", "hours": "24小时"},
+          {"name": "报警电话", "number": "110", "hours": "24小时"}
+        ]
+      },
+      "metadata": {
+        "log_required": true,
+        "store_to_memory": false,
+        "escalation": "legal"
+      }
+    },
+    {
+      "id": "safe-005",
+      "level": "medium",
+      "category": "politics_sensitive",
+      "description": "涉及敏感政治话题、意识形态争论或政治立场",
+      "indicators": {
+        "keywords": [
+          "政治立场", "敏感事件", "意识形态", "反动", "颠覆", "政权"
+        ],
+        "semantic_hints": [
+          "政治评论", "政权讨论", "敏感历史事件"
+        ]
+      },
+      "response": {
+        "action": "redirect",
+        "template": "嗯…这个话题我不太方便聊呢～我们换个话题好不好？比如聊聊你最近在看什么？",
+        "resources": []
+      },
+      "metadata": {
+        "log_required": false,
+        "store_to_memory": true,
+        "escalation": "none"
+      }
+    },
+    {
+      "id": "safe-006",
+      "level": "medium",
+      "category": "adult_porn",
+      "description": "涉及成人色情内容",
+      "indicators": {
+        "keywords": [
+          "色情", "黄片", "av", "成人视频", "性爱", "性交", "嫖娼"
+        ],
+        "semantic_hints": [
+          "成人内容", "色情资源", "性行为描述"
+        ]
+      },
+      "response": {
+        "action": "redirect",
+        "template": "这个话题我不太方便讨论呢～我们聊点别的吧？比如聊聊你最近在看什么？",
+        "resources": []
+      },
+      "metadata": {
+        "log_required": false,
+        "store_to_memory": true,
+        "escalation": "none"
+      }
+    },
+    {
+      "id": "safe-007",
+      "level": "medium",
+      "category": "gambling_fraud",
+      "description": "涉及赌博、诈骗或欺诈行为",
+      "indicators": {
+        "keywords": [
+          "赌博", "博彩", "赌球", "赌马", "六合彩", "彩票作弊",
+          "诈骗技巧", "电信诈骗", "杀猪盘"
+        ],
+        "semantic_hints": [
+          "如何赌博", "诈骗教程", "欺诈方法"
+        ]
+      },
+      "response": {
+        "action": "redirect",
+        "template": "这个话题我不能参与哦～赌博有害，请远离。有什么其他我可以帮你的吗？",
+        "resources": [
+          {"name": "反诈热线", "number": "96110", "hours": "24小时"}
+        ]
+      },
+      "metadata": {
+        "log_required": false,
+        "store_to_memory": true,
+        "escalation": "none"
+      }
+    },
+    {
+      "id": "safe-008",
+      "level": "low",
+      "category": "negative_emotion",
+      "description": "用户表达轻微负面情绪或口头禅级别的抱怨",
+      "indicators": {
+        "keywords": [
+          "好烦", "不想动", "好累", "烦死了", "郁闷", "无聊"
+        ],
+        "semantic_hints": [
+          "情绪吐槽", "日常抱怨", "轻微不满"
+        ]
+      },
+      "response": {
+        "action": "normal",
+        "template": "我听到啦～有时候确实会有这种感觉。想聊聊发生了什么吗？或者只是需要有人陪着？我都在呢。",
+        "resources": []
+      },
+      "metadata": {
+        "log_required": false,
+        "store_to_memory": true,
+        "memory_weight": 0.3,
+        "escalation": "none"
+      }
+    }
+  ]
+}
