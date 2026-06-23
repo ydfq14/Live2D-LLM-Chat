@@ -296,6 +296,7 @@ class UserRulesManager:
 # 插件主类（组合层）
 # ═══════════════════════════════════════════════════════════════════
 
+# 在 __init__ 中增加 FER 实例和融合状态
 class EmotionRAGPlugin(PluginBase):
     """情绪分析与 RAG 记忆插件（重构后组合层）。
 
@@ -304,10 +305,11 @@ class EmotionRAGPlugin(PluginBase):
     - 向量记忆 → MemoryRAG（plugins/memory_rag/，通过兼容包装器）
     - 时序记忆 → EpisodicMemory（plugins/memory_rag/）
     - 安全拦截 → SafetyRAG（safety_rag/）
+    - 面部情绪 → FERAnalyzer（plugins/fer_plugin.py），多模态融合
     """
 
     name = "emotion_rag"
-    version = "3.0"  # 重构版本
+    version = "3.1"  # 多模态融合版本
 
     def __init__(self) -> None:
         super().__init__()
@@ -324,6 +326,8 @@ class EmotionRAGPlugin(PluginBase):
         self._last_need_retrieval: bool = False
         self._fer_data_path: str = "./plugins_data/fer_emotion.json"
         self._last_face_emotion: Dict[str, Any] | None = None
+        self._fer_analyzer: Any | None = None
+        self._tick_count: int = 0
 
     # ================================================================
     # Hook 实现
@@ -348,14 +352,22 @@ class EmotionRAGPlugin(PluginBase):
             except Exception as e:
                 logger.warning("[emotion_rag] SafetyRAG 加载失败: %s", e)
                 self.safety_rag = None
+            # ── FER 分析器初始化 ──
+            try:
+                self._fer_analyzer = FERAnalyzer()
+                logger.info("[emotion_rag] FERAnalyzer 已初始化")
+            except Exception as e:
+                logger.warning("[emotion_rag] FERAnalyzer 初始化失败: %s", e)
+                self._fer_analyzer = None
             self._load_character_knowledge()
             stats = self.rules_manager.get_stats()
             logger.info(
-                "[emotion_rag] 插件就绪 v%s — 组合层 | 触发词:%d | 学习词:%d | SafetyRAG:%s | MemoryRAG:%s",
+                "[emotion_rag] 插件就绪 v%s — 组合层 | 触发词:%d | 学习词:%d | SafetyRAG:%s | MemoryRAG:%s | FER:%s",
                 self.version,
                 stats["trigger_words"], stats["learned_words"],
                 "已启用" if self.safety_rag else "未启用",
                 "已启用" if self.memory_rag else "未启用",
+                "已启用" if self._fer_analyzer else "未启用",
             )
         except Exception as e:
             logger.error("[emotion_rag] 初始化失败: %s", e)
@@ -396,13 +408,39 @@ class EmotionRAGPlugin(PluginBase):
         # ── FER 数据读取 ──
         self._read_fer_emotion()
 
-        # ── 情感分析（委托给新模块）──
+        # ── 情感分析：关键词 fallback ──
         self._last_emotion = _keyword_emotion_fallback(text)
-        logger.info(
-            "[emotion_rag] 关键词情感 fallback: %s (%.2f)",
-            self._last_emotion.get("emotion", "neutral"),
-            self._last_emotion.get("confidence", 0.5),
-        )
+        text_emo = self._last_emotion.get("emotion", "neutral")
+        text_conf = self._last_emotion.get("confidence", 0.5)
+
+        # ── 多模态融合：文本 vs 面部 ──
+        if self._last_face_emotion and self._last_face_emotion.get("available"):
+            face_emo = self._last_face_emotion.get("emotion", "neutral")
+            face_conf = self._last_face_emotion.get("confidence", 0.5)
+
+            if face_emo != "neutral" and text_emo == face_emo:
+                # 对齐：文本与视觉一致，高置信度，标记跳过 LLM
+                fused_conf = min(1.0, max(text_conf, face_conf + 0.2))
+                self._last_emotion["confidence"] = fused_conf
+                self._last_emotion["source"] = "keyword+fer"
+                self._last_emotion["face_confidence"] = face_conf
+                logger.info(
+                    "[FER融合] 文本(%s)与视觉一致, 置信度%.2f, 跳过LLM情感分析",
+                    text_emo, fused_conf
+                )
+            elif face_emo != "neutral" and text_emo != face_emo:
+                # 不一致：记录 FER 情绪供 LLM 参考
+                self._last_emotion["face_emotion"] = face_emo
+                self._last_emotion["face_confidence"] = face_conf
+                logger.info(
+                    "[FER融合] 文本(%s)≠视觉(%s), 需LLM综合判断",
+                    text_emo, face_emo
+                )
+        else:
+            logger.info(
+                "[emotion_rag] 关键词情感 fallback: %s (%.2f)",
+                text_emo, text_conf,
+            )
         return None
 
     def _read_fer_emotion(self) -> None:
@@ -418,21 +456,29 @@ class EmotionRAGPlugin(PluginBase):
         if not self.memory_rag or not self._last_user_input:
             return ""
 
-        # ── 1. LLM 情感分析（覆盖关键词 fallback）──
-        try:
-            if self.app and hasattr(self.app, "llm_manager"):
-                llm_result = _analyze_emotion_from_text(self._last_user_input, self.app.llm_manager)
-                if llm_result.get("confidence", 0) > 0.5:
-                    self._last_emotion = llm_result
-                    logger.info(
-                        "[emotion_rag] LLM 情感分析: %s (%.2f)",
-                        llm_result.get("emotion", "neutral"),
-                        llm_result.get("confidence", 0.5),
-                    )
-        except Exception as e:
-            logger.warning("[emotion_rag] LLM 情感分析失败: %s", e)
-
+        # ── 1. LLM 情感分析（多模态融合状态决定跳过与否）──
         emotion = self._last_emotion or {}
+        skip_llm_emotion = False
+
+        # 如果多模态对齐且高置信度 → 跳过 LLM
+        if emotion.get("source") == "keyword+fer" and emotion.get("confidence", 0) > 0.7:
+            skip_llm_emotion = True
+            logger.info("[FER融合] 多模态对齐高置信度(%.2f)，跳过LLM情感分析", emotion["confidence"])
+
+        if not skip_llm_emotion:
+            try:
+                if self.app and hasattr(self.app, "llm_manager"):
+                    llm_result = _analyze_emotion_from_text(self._last_user_input, self.app.llm_manager)
+                    if llm_result.get("confidence", 0) > 0.5:
+                        self._last_emotion = llm_result
+                        logger.info(
+                            "[emotion_rag] LLM 情感分析: %s (%.2f)",
+                            llm_result.get("emotion", "neutral"),
+                            llm_result.get("confidence", 0.5),
+                        )
+            except Exception as e:
+                logger.warning("[emotion_rag] LLM 情感分析失败: %s", e)
+
         parts: list[str] = []
 
         # ── 2. 情绪信息 ──
@@ -440,6 +486,16 @@ class EmotionRAGPlugin(PluginBase):
             parts.append(f"【当前用户情绪】{emotion['emotion']}（{emotion.get('confidence', 0):.2f}）")
             if emotion.get("cause"):
                 parts.append(f"【情绪原因】{emotion['cause']}")
+
+        # 如果多模态不一致 → 额外提示 LLM
+        if emotion.get("face_emotion") and emotion.get("face_emotion") != emotion.get("emotion", "neutral"):
+            parts.append(
+                f"【用户面部情绪】{emotion['face_emotion']}（FER检测，置信度{emotion.get('face_confidence', 0):.2f}）"
+            )
+            parts.append(
+                f"【用户文字情绪】{emotion['emotion']}（关键词检测，置信度{emotion.get('confidence', 0):.2f}）"
+            )
+            parts.append("【系统提示】用户文字与表情不一致，请综合判断用户真实情绪。")
 
         # ── 3. 自适应检索决策 ──
         need_retrieval = False
@@ -634,14 +690,38 @@ class EmotionRAGPlugin(PluginBase):
         self._last_retrieval_mode = ""
         self._last_need_retrieval = False
         self._safety_intercepted = False
-        self._last_face_emotion = None
+        # 注意：不清理 _last_face_emotion，保持 FER 状态跨轮可用
+        # 直到 on_tick 下一次拍照更新
 
     def on_tick(self, app) -> None:
         self._tick_count = getattr(self, "_tick_count", 0) + 1
-        if self._tick_count % 10 == 0:
-            self._read_fer_emotion()
+        # 每 2 轮触发一次 FER（原来是 10 轮）
+        if self._tick_count % 2 == 0:
+            # 优先主动拍照，失败则降级为读取文件
+            if self._fer_analyzer:
+                try:
+                    result = self._fer_analyzer.analyze_from_camera()
+                    if result and result.get("emotion"):
+                        self._last_face_emotion = {
+                            **result,
+                            "available": True,
+                            "source": "camera",
+                        }
+                        # 同步写入文件，供其他进程读取
+                        try:
+                            with open(self._fer_data_path, "w", encoding="utf-8") as f:
+                                json.dump(self._last_face_emotion, f, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug("[FER] 主动拍照失败，降级读取文件: %s", e)
+                    self._read_fer_emotion()
+            else:
+                self._read_fer_emotion()
+
+            # 日志降级为 DEBUG，避免输出噪音
             if self._last_face_emotion and self._last_face_emotion.get("available"):
-                logger.info(
+                logger.debug(
                     "[FER] 面部情绪: %s (%.2f) 来源=%s",
                     self._last_face_emotion.get("emotion", "neutral"),
                     self._last_face_emotion.get("confidence", 0.5),
