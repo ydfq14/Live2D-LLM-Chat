@@ -321,7 +321,10 @@ class AgenticRAGPlugin(PluginBase):
         Returns:
             JSON 格式的处理结果
         """
+        logger.info("[agentic_rag] 开始文件上传流程: %s", file_path)
+
         if not self._kb:
+            logger.error("[agentic_rag] 上传失败: 知识库未初始化")
             return json.dumps({"success": False, "error": "知识库未初始化"})
 
         try:
@@ -330,45 +333,71 @@ class AgenticRAGPlugin(PluginBase):
 
             # 检查文件是否存在
             if not os.path.exists(file_path):
+                logger.error("[agentic_rag] 上传失败: 文件不存在 - %s", file_path)
                 return json.dumps({"success": False, "error": f"文件不存在: {file_path}"})
+
+            logger.info("[agentic_rag] 文件存在检查通过: %s", file_path)
+
+            # 获取文件信息
+            file_size = os.path.getsize(file_path)
+            file_ext = os.path.splitext(file_path)[1].lower()
+            filename = os.path.basename(file_path)
+            logger.info("[agentic_rag] 文件信息: 名称=%s, 大小=%d bytes, 类型=%s", filename, file_size, file_ext)
 
             # 检查文件类型
             supported_types = {'.txt', '.md', '.pdf', '.json', '.csv'}
-            file_ext = os.path.splitext(file_path)[1].lower()
             if file_ext not in supported_types:
+                logger.error("[agentic_rag] 上传失败: 不支持的文件类型 %s", file_ext)
                 return json.dumps({
                     "success": False,
                     "error": f"不支持的文件类型: {file_ext}，支持: {', '.join(supported_types)}"
                 })
 
+            logger.info("[agentic_rag] 文件类型检查通过: %s", file_ext)
+
+            # 检查文件是否为空
+            if file_size == 0:
+                logger.error("[agentic_rag] 上传失败: 文件为空")
+                return json.dumps({"success": False, "error": "文件内容为空"})
+
             # 创建 IngestionPipeline 并摄入文件
+            logger.info("[agentic_rag] 创建 IngestionPipeline...")
             pipeline = IngestionPipeline(self._kb)
+
+            logger.info("[agentic_rag] 开始摄入文件到知识库...")
             file_id = pipeline.ingest_file(file_path, summary=summary)
 
             if file_id > 0:
                 # 更新统计
                 self._update_stats()
-                logger.info("[agentic_rag] 文件上传成功: %s (ID=%d)", os.path.basename(file_path), file_id)
+                logger.info("[agentic_rag] ✓ 文件上传成功: %s (ID=%d)", filename, file_id)
+                logger.info("[agentic_rag] 当前知识库统计: 文件数=%d, 片段数=%d", self._file_count, self._chunk_count)
                 return json.dumps({
                     "success": True,
                     "file_id": file_id,
-                    "filename": os.path.basename(file_path),
+                    "filename": filename,
                     "message": f"文件已成功索引，ID={file_id}"
                 })
             else:
+                logger.error("[agentic_rag] 上传失败: 文件索引失败，返回 ID=%d", file_id)
                 return json.dumps({"success": False, "error": "文件索引失败，可能是文件内容为空"})
 
         except Exception as e:
-            logger.error("[agentic_rag] 文件上传失败: %s", e)
+            logger.error("[agentic_rag] 文件上传异常: %s", str(e), exc_info=True)
             return json.dumps({"success": False, "error": str(e)})
 
     def get_file_list(self) -> str:
         """获取知识库文件列表（供前端显示）。"""
+        logger.info("[agentic_rag] 获取文件列表请求")
+
         if not self._kb:
+            logger.warning("[agentic_rag] 获取文件列表失败: 知识库未初始化")
             return json.dumps({"files": [], "error": "知识库未初始化"})
 
         try:
             files = self._kb.listFilesPaginated(self._kb_id, page=1, pageSize=100)
+            logger.debug("[agentic_rag] 从数据库获取到 %d 个文件", len(files))
+
             file_list = [
                 {
                     "id": f.get("id"),
@@ -379,9 +408,11 @@ class AgenticRAGPlugin(PluginBase):
                 for f in files
                 if f.get("status") == "done"
             ]
+
+            logger.info("[agentic_rag] 返回 %d 个已完成文件（过滤掉非 done 状态）", len(file_list))
             return json.dumps({"files": file_list})
         except Exception as e:
-            logger.error("[agentic_rag] 获取文件列表失败: %s", e)
+            logger.error("[agentic_rag] 获取文件列表失败: %s", str(e), exc_info=True)
             return json.dumps({"files": [], "error": str(e)})
 
     def delete_file(self, file_id: str) -> str:
@@ -393,27 +424,38 @@ class AgenticRAGPlugin(PluginBase):
         Returns:
             JSON 格式的处理结果
         """
+        logger.info("[agentic_rag] 收到删除文件请求: file_id=%s", file_id)
+
         if not self._kb:
+            logger.error("[agentic_rag] 删除失败: 知识库未初始化")
             return json.dumps({"success": False, "error": "知识库未初始化"})
 
         try:
             fid = int(file_id)
+            logger.info("[agentic_rag] 转换文件 ID: %s -> %d", file_id, fid)
+
             # 获取文件信息（用于日志）
+            logger.debug("[agentic_rag] 查询文件列表以查找目标文件...")
             files = self._kb.listFilesPaginated(self._kb_id, page=1, pageSize=10000)
             target_file = next((f for f in files if f.get("id") == fid), None)
 
             if not target_file:
+                logger.error("[agentic_rag] 删除失败: 文件 ID=%d 不存在", fid)
                 return json.dumps({"success": False, "error": f"文件 ID={fid} 不存在"})
 
             filename = target_file.get("filename", "未知")
+            logger.info("[agentic_rag] 找到目标文件: %s (ID=%d)", filename, fid)
 
             # 删除文件
+            logger.info("[agentic_rag] 开始删除文件...")
             self._kb.delete_file(fid)
+            logger.info("[agentic_rag] 文件已从数据库删除")
 
             # 更新统计
             self._update_stats()
 
-            logger.info("[agentic_rag] 文件已删除: %s (ID=%d)", filename, fid)
+            logger.info("[agentic_rag] ✓ 文件删除成功: %s (ID=%d)", filename, fid)
+            logger.info("[agentic_rag] 当前知识库统计: 文件数=%d, 片段数=%d", self._file_count, self._chunk_count)
             return json.dumps({
                 "success": True,
                 "message": f"文件 '{filename}' 已删除",
@@ -421,9 +463,10 @@ class AgenticRAGPlugin(PluginBase):
             })
 
         except ValueError:
+            logger.error("[agentic_rag] 删除失败: 无效的文件 ID 格式 - %s", file_id)
             return json.dumps({"success": False, "error": f"无效的文件 ID: {file_id}"})
         except Exception as e:
-            logger.error("[agentic_rag] 删除文件失败: %s", e)
+            logger.error("[agentic_rag] 删除文件异常: %s", str(e), exc_info=True)
             return json.dumps({"success": False, "error": str(e)})
 
     def get_frontend_html(self) -> str:
@@ -491,12 +534,14 @@ class AgenticRAGPlugin(PluginBase):
             </div>
 
             <div class="kb-section">
-                <p style="color:#aaa; font-size:12px; margin-bottom:8px">上传文件到知识库（支持 txt/md/pdf/json/csv）</p>
-                <div class="kb-upload-area" id="kbUploadArea" onclick="document.getElementById('kbFileInput').click()">
-                    <p style="color:#888; font-size:13px; margin:0">📁 点击选择文件或拖拽文件到此处</p>
-                    <p style="color:#555; font-size:11px; margin:4px 0 0 0">支持 .txt .md .pdf .json .csv</p>
+                <p style="color:#aaa; font-size:12px; margin-bottom:8px">上传文件到知识库</p>
+                <div class="kb-upload-area" id="kbUploadArea" onclick="kbSelectAndUpload()">
+                    <p style="color:#888; font-size:13px; margin:0">📁 点击此处选择文件</p>
+                    <p style="color:#555; font-size:11px; margin:4px 0 0 0">
+                        <strong>支持的格式：</strong>.txt .md .pdf .json .csv<br>
+                        <span style="color:#e94560">其他格式将被拒绝</span>
+                    </p>
                 </div>
-                <input type="file" id="kbFileInput" accept=".txt,.md,.pdf,.json,.csv" onchange="kbUploadFile(this)">
                 <div id="kbUploadStatus" style="margin-top:8px; font-size:12px; color:#aaa"></div>
             </div>
         </div>
@@ -504,17 +549,22 @@ class AgenticRAGPlugin(PluginBase):
         <script>
             // 刷新文件列表
             function kbRefreshFiles() {{
+                console.log('[agentic_rag] 刷新文件列表...');
                 pywebview.api.call_plugin('agentic_rag', 'get_file_list').then(function(raw) {{
+                    console.log('[agentic_rag] 收到文件列表响应:', raw);
                     var data = JSON.parse(raw);
                     var el = document.getElementById('kbFileList');
                     if (data.error) {{
+                        console.error('[agentic_rag] 获取文件列表失败:', data.error);
                         el.innerHTML = '<p style="color:#e94560; font-size:12px">' + data.error + '</p>';
                         return;
                     }}
                     if (!data.files || data.files.length === 0) {{
+                        console.log('[agentic_rag] 知识库暂无文件');
                         el.innerHTML = '<p style="color:#555; font-size:12px">知识库暂无文件</p>';
                         return;
                     }}
+                    console.log('[agentic_rag] 加载 ' + data.files.length + ' 个文件');
                     var html = '';
                     for (var i = 0; i < data.files.length; i++) {{
                         var f = data.files[i];
@@ -525,14 +575,17 @@ class AgenticRAGPlugin(PluginBase):
                         html += '</div>';
                     }}
                     el.innerHTML = html;
+                    console.log('[agentic_rag] ✓ 文件列表刷新完成');
                 }}).catch(function(e) {{
-                    console.error(e);
+                    console.error('[agentic_rag] 刷新文件列表异常:', e);
                 }});
             }}
 
             // 删除文件
             function kbDeleteFile(fileId, filename) {{
+                console.log('[agentic_rag] 删除文件请求:', fileId, filename);
                 if (!confirm('确定要删除文件 "' + filename + '" 吗？\\n删除后无法恢复。')) {{
+                    console.log('[agentic_rag] 用户取消删除');
                     return;
                 }}
 
@@ -540,60 +593,92 @@ class AgenticRAGPlugin(PluginBase):
                 statusEl.innerHTML = '⏳ 正在删除: ' + filename + '...';
                 statusEl.style.color = '#aaa';
 
+                console.log('[agentic_rag] 调用后端删除 API, fileId:', fileId);
                 pywebview.api.call_plugin('agentic_rag', 'delete_file', String(fileId)).then(function(raw) {{
+                    console.log('[agentic_rag] 收到删除响应:', raw);
                     var data = JSON.parse(raw);
                     if (data.success) {{
+                        console.log('[agentic_rag] ✓ 文件删除成功:', data);
                         statusEl.innerHTML = '✅ ' + data.message;
                         statusEl.style.color = '#4a9';
                         kbRefreshFiles();  // 刷新文件列表
                     }} else {{
+                        console.error('[agentic_rag] ✗ 文件删除失败:', data.error);
                         statusEl.innerHTML = '❌ ' + data.error;
                         statusEl.style.color = '#e94560';
                     }}
                 }}).catch(function(e) {{
+                    console.error('[agentic_rag] 删除过程异常:', e);
                     statusEl.innerHTML = '❌ 删除失败: ' + e.message;
                     statusEl.style.color = '#e94560';
-                    console.error(e);
                 }});
             }}
 
-            // 上传文件
-            function kbUploadFile(input) {{
-                var file = input.files[0];
-                if (!file) return;
-
+            // 选择并上传文件（直接调用 pywebview API）
+            function kbSelectAndUpload() {{
+                console.log('[agentic_rag] 开始文件选择流程');
                 var statusEl = document.getElementById('kbUploadStatus');
-                statusEl.innerHTML = '⏳ 正在上传: ' + file.name + '...';
+                statusEl.innerHTML = '⏳ 正在打开文件选择对话框...';
                 statusEl.style.color = '#aaa';
 
-                // 使用 pywebview 的文件选择 API
-                pywebview.api.select_file(file.name).then(function(filePath) {{
+                // 支持的文件格式列表
+                var supportedExtensions = ['.txt', '.md', '.pdf', '.json', '.csv'];
+
+                // 直接调用 pywebview 的文件选择 API
+                pywebview.api.select_file().then(function(filePath) {{
                     if (!filePath) {{
+                        console.log('[agentic_rag] 用户取消文件选择');
                         statusEl.innerHTML = '❌ 未选择文件';
                         statusEl.style.color = '#e94560';
                         return;
                     }}
 
+                    var filename = filePath.split('\\').pop().split('/').pop();
+                    console.log('[agentic_rag] 用户选择文件:', filePath, '文件名:', filename);
+
+                    // 获取文件扩展名（小写）
+                    var lastDotIndex = filename.lastIndexOf('.');
+                    var fileExtension = lastDotIndex > 0 ? filename.substring(lastDotIndex).toLowerCase() : '';
+
+                    console.log('[agentic_rag] 文件扩展名:', fileExtension);
+
+                    // 前端验证文件类型
+                    if (!fileExtension || supportedExtensions.indexOf(fileExtension) === -1) {{
+                        console.error('[agentic_rag] ✗ 不支持的文件格式:', fileExtension);
+                        var supportedFormats = supportedExtensions.join(', ');
+                        statusEl.innerHTML = '❌ 不支持的文件格式: ' + (fileExtension || '无扩展名') + '<br>支持的格式: ' + supportedFormats;
+                        statusEl.style.color = '#e94560';
+                        return;
+                    }}
+
+                    console.log('[agentic_rag] ✓ 文件格式验证通过:', fileExtension);
+                    statusEl.innerHTML = '⏳ 正在上传: ' + filename + '...';
+                    statusEl.style.color = '#aaa';
+
+                    console.log('[agentic_rag] 调用后端上传 API...');
                     return pywebview.api.call_plugin('agentic_rag', 'upload_file', filePath, '');
                 }}).then(function(raw) {{
-                    if (!raw) return;
+                    if (!raw) {{
+                        console.log('[agentic_rag] 上传 API 返回空结果');
+                        return;
+                    }}
+                    console.log('[agentic_rag] 收到后端响应:', raw);
                     var data = JSON.parse(raw);
                     if (data.success) {{
+                        console.log('[agentic_rag] ✓ 文件上传成功:', data);
                         statusEl.innerHTML = '✅ ' + data.message;
                         statusEl.style.color = '#4a9';
                         kbRefreshFiles();  // 刷新文件列表
                     }} else {{
+                        console.error('[agentic_rag] ✗ 文件上传失败:', data.error);
                         statusEl.innerHTML = '❌ ' + data.error;
                         statusEl.style.color = '#e94560';
                     }}
                 }}).catch(function(e) {{
+                    console.error('[agentic_rag] 上传过程异常:', e);
                     statusEl.innerHTML = '❌ 上传失败: ' + e.message;
                     statusEl.style.color = '#e94560';
-                    console.error(e);
                 }});
-
-                // 清空 input
-                input.value = '';
             }}
 
             // 拖拽上传
@@ -608,15 +693,8 @@ class AgenticRAGPlugin(PluginBase):
             uploadArea.addEventListener('drop', function(e) {{
                 e.preventDefault();
                 uploadArea.classList.remove('dragover');
-                var file = e.dataTransfer.files[0];
-                if (file) {{
-                    // 触发上传
-                    var input = document.getElementById('kbFileInput');
-                    var dt = new DataTransfer();
-                    dt.items.add(file);
-                    input.files = dt.files;
-                    kbUploadFile(input);
-                }}
+                // 拖拽时也直接调用文件选择对话框
+                kbSelectAndUpload();
             }});
 
             // 初始加载文件列表
@@ -631,10 +709,22 @@ class AgenticRAGPlugin(PluginBase):
     def _update_stats(self) -> None:
         """更新知识库统计信息。"""
         if not self._kb:
+            logger.debug("[agentic_rag] 更新统计跳过: 知识库未初始化")
             return
+
         try:
+            logger.debug("[agentic_rag] 开始更新知识库统计...")
             files = self._kb.listFilesPaginated(self._kb_id, page=1, pageSize=10000)
+            old_file_count = self._file_count
+            old_chunk_count = self._chunk_count
+
             self._file_count = len(files)
             self._chunk_count = sum(f.get("chunk_count", 0) for f in files)
+
+            if old_file_count != self._file_count or old_chunk_count != self._chunk_count:
+                logger.info("[agentic_rag] 统计已更新: 文件数 %d->%d, 片段数 %d->%d",
+                           old_file_count, self._file_count, old_chunk_count, self._chunk_count)
+            else:
+                logger.debug("[agentic_rag] 统计未变化: 文件数=%d, 片段数=%d", self._file_count, self._chunk_count)
         except Exception as e:
-            logger.debug("[agentic_rag] 更新统计失败: %s", e)
+            logger.warning("[agentic_rag] 更新统计失败: %s", str(e))

@@ -4,8 +4,49 @@ import os
 # 导入按时间自动切割日志文件的处理器（避免单个日志文件无限膨胀）
 from logging.handlers import TimedRotatingFileHandler
 
+
 # 确保日志目录存在
 os.makedirs("logs", exist_ok=True)
+
+
+class ColoredFormatter(logging.Formatter):
+    """
+    自定义颜色格式化器：为不同日志级别添加 ANSI 颜色代码
+    - ERROR/CRITICAL: 红色
+    - WARNING: 黄色
+    - INFO: 正常
+    - DEBUG: 灰色
+    """
+
+    # ANSI 颜色代码定义
+    COLORS = {
+        'DEBUG': '\033[90m',      # 灰色
+        'INFO': '\033[0m',        # 正常（无颜色）
+        'WARNING': '\033[33m',    # 黄色
+        'ERROR': '\033[31m',      # 红色
+        'CRITICAL': '\033[1;31m', # 亮红色（加粗）
+    }
+
+    def format(self, record):
+        """
+        重写 format 方法，为日志级别添加颜色标记
+        """
+        # 获取对应级别的颜色代码
+        color = self.COLORS.get(record.levelname, '\033[0m')
+
+        # 保存原始的 levelname
+        original_levelname = record.levelname
+
+        # 在 levelname 前添加颜色代码，后面重置颜色
+        record.levelname = f"{color}{record.levelname}\033[0m"
+
+        # 调用父类的 format 方法生成格式化后的日志字符串
+        result = super().format(record)
+
+        # 恢复原始的 levelname（避免影响其他处理器）
+        record.levelname = original_levelname
+
+        return result
 
 def get_logger(name=__name__):
     """
@@ -33,7 +74,10 @@ def get_logger(name=__name__):
     # ========== 处理器1：StreamHandler 控制台输出 ==========
     sh = logging.StreamHandler()  # 构建控制台输出处理器，日志打印到终端
     sh.setLevel(logging.INFO)     # 该处理器单独级别：控制台只输出INFO及更高级别日志
-    sh.setFormatter(fmt)          # 给控制台处理器绑定上面定义好的日志格式
+
+    # 使用颜色格式化器（控制台输出带颜色）
+    colored_fmt = ColoredFormatter(fmt_str, datefmt="%Y-%m-%d %H:%M:%S")
+    sh.setFormatter(colored_fmt)  # 给控制台处理器绑定颜色格式化器
 
     # ========== 处理器2：TimedRotatingFileHandler 按天切分日志文件 ==========
     th = TimedRotatingFileHandler(

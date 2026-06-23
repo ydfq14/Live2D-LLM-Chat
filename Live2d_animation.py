@@ -187,9 +187,54 @@ class Live2DAnimationManager:
         try:
             from pynput import mouse as pynput_mouse  # type: ignore
         except Exception:
-            # pynput 不可用，保持旧行为（_start_global_mouse_listener 会安装低级钩子）
+            # pynput 不可用，创建低级鼠标钩子回调作为备用方案
             self._pynput_available = False
             self._pynput_listener = None
+
+            # 定义低级鼠标钩子回调函数类型
+            HOOKPROC = ctypes.CFUNCTYPE(
+                ctypes.c_long,                      # 返回值：LRESULT
+                ctypes.c_int,                       # nCode：钩子代码
+                ctypes.wintypes.WPARAM,             # wParam：消息标识符
+                ctypes.wintypes.LPARAM              # lParam：指向 MSLLHOOKSTRUCT 的指针
+            )
+
+            def _low_level_mouse_proc(nCode, wParam, lParam):
+                """低级鼠标钩子回调：处理鼠标事件用于窗口拖动"""
+                try:
+                    if nCode >= 0:
+                        # 解析钩子事件数据
+                        struct = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+                        sx, sy = struct.pt.x, struct.pt.y
+
+                        # 鼠标移动
+                        if wParam == WM_MOUSEMOVE:
+                            if self._dragging and not self._need_drag_init:
+                                dx = sx - self._pending_drag_mouse[0]
+                                dy = sy - self._pending_drag_mouse[1]
+                                self._pending_win_x = self._drag_start_win[0] + dx
+                                self._pending_win_y = self._drag_start_win[1] + dy
+                                self._has_pending_move = True
+
+                        # 右键按下
+                        elif wParam == WM_RBUTTONDOWN:
+                            if self._is_over_window(sx, sy):
+                                self._pending_drag_mouse = (sx, sy)
+                                self._need_drag_init = True
+                                self._request_capture = True
+
+                        # 右键释放
+                        elif wParam == WM_RBUTTONUP:
+                            if self._dragging or getattr(self, '_request_capture', False):
+                                self._request_release = True
+                except Exception as e:
+                    logger.error(f"低级鼠标钩子回调异常: {e}")
+
+                # 继续传递事件（返回 0 表示不拦截）
+                return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+            # 保存回调函数引用（重要：防止垃圾回收）
+            self._hook_proc = HOOKPROC(_low_level_mouse_proc)
             return
 
         self._pynput_available = True
