@@ -109,33 +109,48 @@ class ChromaAdapter(VectorStore):
             import chromadb
             from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
+            logger.info("[ChromaAdapter] 开始初始化 (collection: %s)", self.collection_name)
             os.makedirs(self.persist_dir, exist_ok=True)
+            logger.debug("[ChromaAdapter] 持久化目录: %s", self.persist_dir)
+
             self.client = chromadb.PersistentClient(path=self.persist_dir)
+            logger.info("[ChromaAdapter] ChromaDB 客户端已创建")
 
             # ── 优先使用本地模型（魔搭/手动下载），避免网络依赖 ──
             model_path = self._resolve_model_path(self.embedding_model)
             if model_path != self.embedding_model:
-                logger.info("[ChromaAdapter] 使用本地模型: %s", model_path)
+                logger.info("[ChromaAdapter] ✓ 使用本地模型: %s", model_path)
             else:
-                logger.info("[ChromaAdapter] 使用远程模型: %s (需联网下载)", model_path)
+                logger.warning("[ChromaAdapter] ⚠ 使用远程模型: %s (需联网下载，可能较慢)", model_path)
+                logger.info("[ChromaAdapter] 提示：如果下载失败，请设置环境变量 HF_ENDPOINT=https://hf-mirror.com")
+                logger.info("[ChromaAdapter] 或手动下载模型到 ./models/ 目录")
 
-            self.embedding_fn = SentenceTransformerEmbeddingFunction(model_name=model_path)
-
+            logger.info("[ChromaAdapter] 加载 SentenceTransformer 模型: %s", model_path)
             try:
-                self.collection = self.client.get_collection(
-                    name=self.collection_name, embedding_function=self.embedding_fn
-                )
-                logger.info("[ChromaAdapter] 复用 collection: %s", self.collection_name)
-            except Exception:
-                self.collection = self.client.create_collection(
-                    name=self.collection_name, embedding_function=self.embedding_fn
-                )
-                logger.info("[ChromaAdapter] 创建 collection: %s", self.collection_name)
+                self.embedding_fn = SentenceTransformerEmbeddingFunction(model_name=model_path)
+                logger.info("[ChromaAdapter] ✓ SentenceTransformer 模型加载成功")
+            except Exception as model_error:
+                logger.error("[ChromaAdapter] ✗ SentenceTransformer 模型加载失败: %s", str(model_error))
+                logger.error("[ChromaAdapter] 可能原因：")
+                logger.error("[ChromaAdapter]   1. 网络不通，无法下载模型")
+                logger.error("[ChromaAdapter]   2. 模型文件损坏")
+                logger.error("[ChromaAdapter] 解决方案：")
+                logger.error("[ChromaAdapter]   - 设置环境变量: HF_ENDPOINT=https://hf-mirror.com")
+                logger.error("[ChromaAdapter]   - 或手动下载模型到: ./models/sentence-transformers_all-MiniLM-L6-v2/")
+                raise model_error
+
+            # 使用 get_or_create_collection 避免 "already exists" 错误
+            logger.info("[ChromaAdapter] 创建/获取 collection: %s", self.collection_name)
+            self.collection = self.client.get_or_create_collection(
+                name=self.collection_name, embedding_function=self.embedding_fn
+            )
+            logger.info("[ChromaAdapter] ✓ Collection '%s' 就绪", self.collection_name)
 
         except ImportError as e:
-            logger.error("[ChromaAdapter] chromadb 未安装: %s", e)
+            logger.error("[ChromaAdapter] ✗ chromadb 未安装: %s", e)
+            logger.error("[ChromaAdapter] 请运行: pip install chromadb")
         except Exception as e:
-            logger.error("[ChromaAdapter] 初始化失败: %s", e)
+            logger.error("[ChromaAdapter] ✗ 初始化失败: %s", str(e), exc_info=True)
 
     @staticmethod
     def _resolve_model_path(model_name: str) -> str:

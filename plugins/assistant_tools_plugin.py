@@ -26,7 +26,7 @@ class AssistantToolsPlugin(PluginBase):
                 app.llm_manager.features = self.features
 
         # 启动提醒后台线程（如果尚未启动）
-        self.features.start_reminder_loop()
+        self.features.start_reminders()
         logger.info("AssistantToolsPlugin 启动完成，features 已就绪")
 
     def on_register_tools(self) -> list[dict]:

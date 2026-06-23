@@ -131,6 +131,7 @@ class UIShell:
                 Returns:
                     文件路径字符串，如果取消则返回空字符串
                 """
+                logger.info("[UI] 文件选择对话框请求，提示文件名: %s", filename if filename else "无")
                 try:
                     import webview
                     # 打开文件选择对话框
@@ -140,6 +141,7 @@ class UIShell:
                         'JSON 文件 (*.json)',
                         '所有文件 (*.*)'
                     )
+                    logger.debug("[UI] 打开文件选择对话框，支持类型: %s", file_types)
                     result = self._shell._window.create_file_dialog(
                         webview.OPEN_DIALOG,
                         allow_multiple=False,
@@ -147,13 +149,15 @@ class UIShell:
                     )
                     if result and len(result) > 0:
                         file_path = result[0]
-                        logger.info(f"[UI] 选择文件: {file_path}")
+                        import os
+                        file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                        logger.info("[UI] ✓ 用户选择文件: %s (大小: %d bytes)", file_path, file_size)
                         return file_path
                     else:
-                        logger.info("[UI] 取消文件选择")
+                        logger.info("[UI] 用户取消文件选择")
                         return ""
                 except Exception as e:
-                    logger.error(f"[UI] 文件选择失败: {e}")
+                    logger.error("[UI] ✗ 文件选择对话框失败: %s", str(e), exc_info=True)
                     return ""
 
         self._window = webview.create_window(

@@ -337,10 +337,18 @@ class EmotionRAGPlugin(PluginBase):
         super().on_startup(app)
         # ── MemoryRAG 独立初始化（失败时不影响其他组件）──
         try:
+            logger.info("[emotion_rag] 初始化 MemoryRAG...")
             self.memory_rag = MemoryRAG(persist_dir="./plugins_data/memory")
-            logger.info("[emotion_rag] MemoryRAG 已初始化")
+            logger.info("[emotion_rag] ✓ MemoryRAG 已初始化")
         except Exception as e:
-            logger.warning("[emotion_rag] MemoryRAG 初始化失败: %s。记忆检索功能不可用。", e)
+            logger.warning("[emotion_rag] ⚠ MemoryRAG 初始化失败: %s", str(e))
+            logger.warning("[emotion_rag] 记忆检索功能将不可用，但其他功能正常")
+            logger.info("[emotion_rag] 提示：MemoryRAG 失败不影响对话、情绪检测等核心功能")
+            logger.info("[emotion_rag] 如需启用记忆功能，请按以下步骤排查：")
+            logger.info("[emotion_rag]   1. 检查网络连接")
+            logger.info("[emotion_rag]   2. 设置环境变量: HF_ENDPOINT=https://hf-mirror.com")
+            logger.info("[emotion_rag]   3. 或手动下载模型到: ./models/sentence-transformers_all-MiniLM-L6-v2/")
+            logger.debug("[emotion_rag] MemoryRAG 详细错误: %s", str(e), exc_info=True)
             self.memory_rag = None
 
         try:
