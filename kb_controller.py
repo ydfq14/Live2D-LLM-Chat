@@ -103,6 +103,11 @@ class EmbeddingManager:
         self._local_dir = local_dir or _get_sentence_transformers_cache_dir()
         self._model = None
 
+    @property
+    def model_name(self) -> str:
+        """获取模型名称。"""
+        return self._model_name
+
     def _download_from_modelscope(self) -> str:
         """从魔塔社区下载模型到本地目录（遵循项目约定）。"""
         try:
@@ -123,19 +128,68 @@ class EmbeddingManager:
         if self._model is not None:
             return
         from sentence_transformers import SentenceTransformer
+        from pathlib import Path
 
         local_dir = self._local_dir
+        log.info("尝试加载 embedding 模型，本地目录: %s", local_dir)
+
+        # 检查本地目录是否存在
         if local_dir and Path(local_dir).is_dir():
-            load_source = local_dir
-            log.info("从本地加载 embedding 模型: %s", load_source)
+            # 查找 snapshot 目录中的正确模型路径
+            snapshot_path = self._find_snapshot_path(local_dir)
+            if snapshot_path:
+                load_source = snapshot_path
+                log.info("✓ 找到模型快照: %s", load_source)
+            else:
+                # 直接使用本地目录
+                load_source = local_dir
+                log.info("使用本地目录: %s", load_source)
         else:
             load_source = self._download_from_modelscope()
+            log.info("从远程下载模型: %s", load_source)
 
-        self._model = SentenceTransformer(load_source, trust_remote_code=True)
-        log.info(
-            "embedding 模型加载完成，维度: %d",
-            self._model.get_sentence_embedding_dimension(),
-        )
+        try:
+            log.info("正在加载 SentenceTransformer 模型: %s", load_source)
+            self._model = SentenceTransformer(load_source, trust_remote_code=True)
+            log.info(
+                "✓ embedding 模型加载完成，维度: %d",
+                self._model.get_sentence_embedding_dimension(),
+            )
+        except Exception as e:
+            log.error("✗ 模型加载失败: %s", str(e))
+            log.info("尝试使用模型名称直接加载...")
+            # 如果本地加载失败，尝试使用模型名称
+            try:
+                self._model = SentenceTransformer(self._model_name, trust_remote_code=True)
+                log.info("✓ 使用模型名称加载成功")
+            except Exception as e2:
+                log.error("✗ 使用模型名称也失败: %s", str(e2))
+                raise
+
+    def _find_snapshot_path(self, base_dir: str) -> Optional[str]:
+        """在 HuggingFace Hub 缓存目录中查找最新的 snapshot 路径。"""
+        import glob
+        from pathlib import Path
+
+        base_path = Path(base_dir)
+
+        # 查找 models--* 目录
+        model_dirs = list(base_path.glob("models--*"))
+        if not model_dirs:
+            return None
+
+        # 查找最新的 snapshot
+        for model_dir in model_dirs:
+            snapshots_dir = model_dir / "snapshots"
+            if snapshots_dir.exists():
+                snapshots = list(snapshots_dir.iterdir())
+                if snapshots:
+                    # 返回最新的 snapshot
+                    latest = max(snapshots, key=lambda p: p.stat().st_mtime)
+                    log.debug("找到 snapshot: %s", latest)
+                    return str(latest)
+
+        return None
 
     def encode(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
         """将文本列表编码为向量列表。"""
@@ -148,6 +202,11 @@ class EmbeddingManager:
     def encode_single(self, text: str) -> List[float]:
         """编码单条文本。"""
         return self.encode([text])[0]
+
+    def get_embedding_dimension(self) -> int:
+        """获取 embedding 模型的输出维度。"""
+        self._load()
+        return self._model.get_sentence_embedding_dimension()
 
 
 # =====================================================================
@@ -300,6 +359,10 @@ class MilvusLiteKBController:
             log.info("已加载现有 collection: %s", self._collection_name)
             return
 
+        # 获取 embedding 模型的实际维度
+        embedding_dim = self._embedding.get_embedding_dimension()
+        log.info("使用 embedding 维度: %d (模型: %s)", embedding_dim, self._embedding.model_name)
+
         # 创建 schema
         fields = [
             FieldSchema(
@@ -313,7 +376,7 @@ class MilvusLiteKBController:
             FieldSchema(name="file_name", dtype=DataType.VARCHAR, max_length=512),
             FieldSchema(name="summary", dtype=DataType.VARCHAR, max_length=2048),
             FieldSchema(
-                name="embedding", dtype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM
+                name="embedding", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim
             ),
         ]
         schema = CollectionSchema(
@@ -725,8 +788,11 @@ class IngestionPipeline:
         将文本切分为 chunks。
         策略：先按段落（双换行）拆分，再对超长段落按字符数切分。
         """
+        log.info("  开始切片，文本长度: %d 字符", len(text))
+
         # 按段落拆分
         paragraphs = re.split(r"\n\s*\n", text)
+        log.info("  按段落拆分: %d 个段落", len(paragraphs))
 
         chunks = []
         current = ""
@@ -766,9 +832,10 @@ class IngestionPipeline:
                     else current[cut_point:].strip()
                 )
 
-        if current and len(current.strip()) > 10:
+        if current and len(current.strip()) > 0:
             chunks.append(current.strip())
 
+        log.info("  切片完成: %d 个 chunks", len(chunks))
         return chunks
 
     # -------------------- 摄入单个文件 --------------------

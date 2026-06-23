@@ -86,6 +86,25 @@ class UIShell:
 
         html = self._build_html()
 
+        # 记录 HTML 生成情况
+        logger.info("[UIShell] HTML 已生成，长度: %d 字符", len(html))
+
+        # 检查关键 JavaScript 函数是否包含在 HTML 中
+        if 'kbSelectAndUpload' in html:
+            logger.info("[UIShell] ✓ kbSelectAndUpload 函数已包含在 HTML 中")
+        else:
+            logger.error("[UIShell] ✗ kbSelectAndUpload 函数未找到!")
+
+        if 'testClick' in html:
+            logger.info("[UIShell] ✓ testClick 函数已包含在 HTML 中")
+        else:
+            logger.error("[UIShell] ✗ testClick 函数未找到!")
+
+        if 'kbRefreshFiles' in html:
+            logger.info("[UIShell] ✓ kbRefreshFiles 函数已包含在 HTML 中")
+        else:
+            logger.error("[UIShell] ✗ kbRefreshFiles 函数未找到!")
+
         # 暴露给前端 JS 的 Python API
         class JSAPI:
             def __init__(self, shell: UIShell):
@@ -169,7 +188,9 @@ class UIShell:
             resizable=True,
             on_top=True,
         )
-        webview.start(debug=False, http_server=True)
+        # 启用调试模式，便于查看 JavaScript 错误
+        logger.info("[UIShell] 启动 pywebview 窗口 (debug=True, http_server=False)")
+        webview.start(debug=True, http_server=False)
         self._running = False
 
     # ==================================================================

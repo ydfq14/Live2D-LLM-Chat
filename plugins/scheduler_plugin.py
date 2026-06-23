@@ -609,8 +609,22 @@ function schAdd() {
 function schDone(id) {
     pywebview.api.call_plugin('scheduler', '_complete_task', id).then(function() { schRefresh(); });
 }
-setInterval(schRefresh, 5000);
-schRefresh();
+
+// 等待 pywebview 就绪后再初始化
+if (window.pywebview) {{
+    // pywebview 已经注入，直接初始化
+    console.log('[scheduler] pywebview 已就绪，初始化');
+    setInterval(schRefresh, 5000);
+    schRefresh();
+}} else {{
+    // 等待 pywebviewready 事件
+    console.log('[scheduler] 等待 pywebview 就绪...');
+    window.addEventListener('pywebviewready', function() {{
+        console.log('[scheduler] pywebview 已就绪，初始化');
+        setInterval(schRefresh, 5000);
+        schRefresh();
+    }});
+}}
 </script>
 """
 

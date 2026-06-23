@@ -535,6 +535,12 @@ class AgenticRAGPlugin(PluginBase):
 
             <div class="kb-section">
                 <p style="color:#aaa; font-size:12px; margin-bottom:8px">上传文件到知识库</p>
+
+                <!-- 测试按钮 -->
+                <button onclick="testClick()" style="padding: 8px 16px; margin-bottom: 10px; background: #4a9; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    🧪 测试点击事件
+                </button>
+
                 <div class="kb-upload-area" id="kbUploadArea" onclick="kbSelectAndUpload()">
                     <p style="color:#888; font-size:13px; margin:0">📁 点击此处选择文件</p>
                     <p style="color:#555; font-size:11px; margin:4px 0 0 0">
@@ -547,6 +553,18 @@ class AgenticRAGPlugin(PluginBase):
         </div>
 
         <script>
+            // 页面加载完成时的初始化日志
+            console.log('===========================================');
+            console.log('[agentic_rag] 前端页面已加载');
+            console.log('[agentic_rag] JavaScript 环境正常');
+            console.log('===========================================');
+
+            // 测试 onclick 是否工作
+            function testClick() {{
+                console.log('[agentic_rag] 测试点击事件触发成功！');
+                alert('点击事件正常工作！');
+            }}
+
             // 刷新文件列表
             function kbRefreshFiles() {{
                 console.log('[agentic_rag] 刷新文件列表...');
@@ -571,14 +589,32 @@ class AgenticRAGPlugin(PluginBase):
                         html += '<div class="kb-file-item">';
                         html += '<span class="kb-file-name">📄 ' + f.filename + '</span>';
                         html += '<span class="kb-file-chunks">' + f.chunk_count + ' 片段</span>';
-                        html += '<button class="kb-file-delete" onclick="kbDeleteFile(' + f.id + ', \'' + f.filename.replace(/'/g, "\\'") + '\')">删除</button>';
+                        html += '<button class="kb-file-delete" onclick="handleDeleteClick(this)" data-file-id="' + f.id + '">删除</button>';
                         html += '</div>';
                     }}
                     el.innerHTML = html;
-                    console.log('[agentic_rag] ✓ 文件列表刷新完成');
+
+                    // 绑定删除按钮事件
+                    var deleteButtons = el.querySelectorAll('.kb-file-delete');
+                    deleteButtons.forEach(function(btn) {{
+                        // 从 data 属性获取文件 ID
+                        var fileId = btn.getAttribute('data-file-id');
+                        // 存储在按钮上，点击时使用
+                        btn.fileId = fileId;
+                    }});
+
+                    console.log('[agentic_rag] ✓ 文件列表刷新完成，已绑定 ' + deleteButtons.length + ' 个删除按钮');
                 }}).catch(function(e) {{
                     console.error('[agentic_rag] 刷新文件列表异常:', e);
                 }});
+            }}
+
+            // 处理删除按钮点击
+            function handleDeleteClick(button) {{
+                var fileId = button.getAttribute('data-file-id');
+                var filename = button.parentElement.querySelector('.kb-file-name').textContent.replace('📄 ', '');
+                console.log('[agentic_rag] 删除按钮点击:', fileId, filename);
+                kbDeleteFile(fileId, filename);
             }}
 
             // 删除文件
@@ -616,16 +652,50 @@ class AgenticRAGPlugin(PluginBase):
 
             // 选择并上传文件（直接调用 pywebview API）
             function kbSelectAndUpload() {{
-                console.log('[agentic_rag] 开始文件选择流程');
+                console.log('[agentic_rag] ========== 开始文件选择流程 ==========');
+                console.log('[agentic_rag] 检查 pywebview.api 是否可用...');
+                console.log('[agentic_rag] pywebview:', typeof pywebview);
+                console.log('[agentic_rag] pywebview.api:', typeof pywebview !== 'undefined' ? typeof pywebview.api : 'pywebview 未定义');
+
                 var statusEl = document.getElementById('kbUploadStatus');
+                if (!statusEl) {{
+                    console.error('[agentic_rag] ✗ 找不到 kbUploadStatus 元素');
+                    return;
+                }}
+
                 statusEl.innerHTML = '⏳ 正在打开文件选择对话框...';
                 statusEl.style.color = '#aaa';
+
+                // 检查 pywebview 和 API 是否可用
+                if (typeof pywebview === 'undefined') {{
+                    console.error('[agentic_rag] ✗ pywebview 未定义');
+                    statusEl.innerHTML = '❌ pywebview 未初始化，请刷新页面重试';
+                    statusEl.style.color = '#e94560';
+                    return;
+                }}
+
+                if (!pywebview.api) {{
+                    console.error('[agentic_rag] ✗ pywebview.api 未定义');
+                    statusEl.innerHTML = '❌ pywebview API 未就绪，请稍候重试';
+                    statusEl.style.color = '#e94560';
+                    return;
+                }}
+
+                if (typeof pywebview.api.select_file !== 'function') {{
+                    console.error('[agentic_rag] ✗ pywebview.api.select_file 不是函数');
+                    console.log('[agentic_rag] pywebview.api 的方法:', Object.keys(pywebview.api));
+                    statusEl.innerHTML = '❌ 文件选择 API 不可用';
+                    statusEl.style.color = '#e94560';
+                    return;
+                }}
 
                 // 支持的文件格式列表
                 var supportedExtensions = ['.txt', '.md', '.pdf', '.json', '.csv'];
 
+                console.log('[agentic_rag] ✓ 所有检查通过，调用 select_file API...');
                 // 直接调用 pywebview 的文件选择 API
                 pywebview.api.select_file().then(function(filePath) {{
+                    console.log('[agentic_rag] select_file 返回结果:', filePath);
                     if (!filePath) {{
                         console.log('[agentic_rag] 用户取消文件选择');
                         statusEl.innerHTML = '❌ 未选择文件';
@@ -633,7 +703,7 @@ class AgenticRAGPlugin(PluginBase):
                         return;
                     }}
 
-                    var filename = filePath.split('\\').pop().split('/').pop();
+                    var filename = filePath.split('\\\\').pop().split('/').pop();
                     console.log('[agentic_rag] 用户选择文件:', filePath, '文件名:', filename);
 
                     // 获取文件扩展名（小写）
@@ -675,10 +745,12 @@ class AgenticRAGPlugin(PluginBase):
                         statusEl.style.color = '#e94560';
                     }}
                 }}).catch(function(e) {{
-                    console.error('[agentic_rag] 上传过程异常:', e);
+                    console.error('[agentic_rag] ✗ 上传过程异常:', e);
+                    console.error('[agentic_rag] 错误堆栈:', e.stack);
                     statusEl.innerHTML = '❌ 上传失败: ' + e.message;
                     statusEl.style.color = '#e94560';
                 }});
+                console.log('[agentic_rag] ========== 文件选择流程结束 ==========');
             }}
 
             // 拖拽上传
@@ -697,8 +769,19 @@ class AgenticRAGPlugin(PluginBase):
                 kbSelectAndUpload();
             }});
 
-            // 初始加载文件列表
-            kbRefreshFiles();
+            // 等待 pywebview 就绪后再加载文件列表
+            if (window.pywebview) {{
+                // pywebview 已经注入，直接加载
+                console.log('[agentic_rag] pywebview 已就绪，加载文件列表');
+                kbRefreshFiles();
+            }} else {{
+                // 等待 pywebviewready 事件
+                console.log('[agentic_rag] 等待 pywebview 就绪...');
+                window.addEventListener('pywebviewready', function() {{
+                    console.log('[agentic_rag] pywebview 已就绪，加载文件列表');
+                    kbRefreshFiles();
+                }});
+            }}
         </script>
         """
 

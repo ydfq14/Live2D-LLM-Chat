@@ -14,6 +14,16 @@ if _env_path.exists():
                 _key, _val = _line.split("=", 1)
                 os.environ.setdefault(_key.strip(), _val.strip())
 
+# ============================================================
+# 自动设置 HuggingFace 镜像（国内加速）
+# 如果用户没有设置 HF_ENDPOINT，自动使用镜像避免网络超时
+# ============================================================
+if not os.environ.get("HF_ENDPOINT"):
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+    print(f"[Config] 已自动设置 HuggingFace 镜像: {os.environ['HF_ENDPOINT']}")
+else:
+    print(f"[Config] 使用用户设置的 HuggingFace 端点: {os.environ['HF_ENDPOINT']}")
+
 class Config:
     # 项目根目录（动态获取，自动适配任何安装位置，无需手动修改）
     PROJECT_ROOT = str(Path(__file__).parent)
