@@ -1,18 +1,44 @@
 """
 聊天框插件 —— 提供文字输入界面，用户可直接打字与 AI 对话。
 
-前端：聊天气泡 + 输入框 + 发送按钮
-后端：记录对话消息供前端轮询展示
+前端：聊天气泡 + 输入框 + 发送按钮 + 文件附件
+后端：记录对话消息供前端轮询展示，支持文件上下文注入
 """
 
 from __future__ import annotations
 
 import json
-import threading
+import os
+from pathlib import Path
 from plugin_base import PluginBase
 from log_config import get_logger
 
 logger = get_logger(__name__)
+
+# 文件附件配置
+MAX_FILE_CONTEXT_CHARS = 50000  # 最大50K字符（约15K tokens）
+SUPPORTED_FILE_TYPES = {'.txt', '.md', '.pdf', '.json', '.csv', '.log'}
+
+
+def _extract_file_text(file_path: str) -> str:
+    """从文件中提取文本（轻量级，不依赖重量级库）。
+
+    支持: PDF (pypdf), TXT/MD/CSV/JSON/LOG (直接读取)
+    """
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        from pypdf import PdfReader
+        reader = PdfReader(file_path)
+        pages = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                pages.append(text.strip())
+        return "\n\n".join(pages)
+    else:
+        return path.read_text(encoding="utf-8")
 
 
 class ChatboxPlugin(PluginBase):
@@ -23,9 +49,9 @@ class ChatboxPlugin(PluginBase):
 
     def __init__(self) -> None:
         super().__init__()
-        # 消息列表（供前端轮询展示）
         self._messages: list[dict[str, str]] = []
-        self._listening_enabled = None  # 从 app 获取
+        self._listening_enabled = None
+        self._attached_file: dict | None = None  # 文件附件
 
     # ==================================================================
     #  Hook
@@ -76,9 +102,102 @@ class ChatboxPlugin(PluginBase):
         }, ensure_ascii=False)
 
     def clear_messages(self) -> str:
-        """清空消息列表。"""
+        """清空消息列表和附件。"""
         self._messages.clear()
+        self._attached_file = None
         return "ok"
+
+    # ==================================================================
+    #  文件附件 API
+    # ==================================================================
+
+    def attach_file(self, file_path: str) -> str:
+        """附加文件作为对话上下文。
+
+        Args:
+            file_path: 文件绝对路径
+
+        Returns:
+            JSON: {"success": true, "filename": ..., "char_count": ...} 或 {"success": false, "error": ...}
+        """
+        if not file_path:
+            return json.dumps({"success": False, "error": "未选择文件"})
+
+        if not os.path.exists(file_path):
+            return json.dumps({"success": False, "error": f"文件不存在: {file_path}"})
+
+        # 验证文件类型
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in SUPPORTED_FILE_TYPES:
+            return json.dumps({
+                "success": False,
+                "error": f"不支持的文件类型: {ext}，支持: {' '.join(sorted(SUPPORTED_FILE_TYPES))}"
+            })
+
+        try:
+            text = _extract_file_text(file_path)
+        except Exception as e:
+            logger.error("[chatbox] 文件读取失败: %s", e)
+            return json.dumps({"success": False, "error": f"文件读取失败: {e}"})
+
+        if not text or not text.strip():
+            return json.dumps({"success": False, "error": "文件内容为空"})
+
+        # 截断超长内容
+        truncated = False
+        if len(text) > MAX_FILE_CONTEXT_CHARS:
+            text = text[:MAX_FILE_CONTEXT_CHARS]
+            truncated = True
+
+        filename = os.path.basename(file_path)
+        self._attached_file = {
+            "filename": filename,
+            "content": text,
+            "char_count": len(text),
+        }
+
+        logger.info("[chatbox] 文件已附加: %s (%d 字符%s)", filename, len(text), "，已截断" if truncated else "")
+
+        result = {"success": True, "filename": filename, "char_count": len(text)}
+        if truncated:
+            result["warning"] = f"文件内容过长，已截断至 {MAX_FILE_CONTEXT_CHARS} 字符"
+        return json.dumps(result, ensure_ascii=False)
+
+    def clear_attachment(self) -> str:
+        """移除附件。"""
+        self._attached_file = None
+        logger.info("[chatbox] 附件已移除")
+        return "ok"
+
+    def get_attachment_status(self) -> str:
+        """获取附件状态（供前端轮询）。"""
+        if self._attached_file is None:
+            return json.dumps({"attached": False})
+        return json.dumps({
+            "attached": True,
+            "filename": self._attached_file["filename"],
+            "char_count": self._attached_file["char_count"],
+        }, ensure_ascii=False)
+
+    # ==================================================================
+    #  LLM 上下文注入
+    # ==================================================================
+
+    def on_llm_context(self, user_input: str) -> str:
+        """将附件内容注入 LLM 上下文。"""
+        if self._attached_file is None:
+            logger.debug("[chatbox] on_llm_context: 无附件")
+            return ""
+
+        context = (
+            f'【用户附件】用户上传了文件 "{self._attached_file["filename"]}"，内容如下：\n'
+            f'---文件内容开始---\n'
+            f'{self._attached_file["content"]}\n'
+            f'---文件内容结束---\n'
+            f'请基于此文件内容回答用户的问题，必要时也可以调用其他工具。'
+        )
+        logger.info("[chatbox] on_llm_context: 注入附件内容 (%d 字符)", len(context))
+        return context
 
     # ==================================================================
     #  聆听控制 API
@@ -187,6 +306,55 @@ class ChatboxPlugin(PluginBase):
 .listen-btn.enabled {
     background: #e94560 !important;
 }
+.attach-btn {
+    padding: 8px 10px !important;
+    font-size: 14px !important;
+    background: #444 !important;
+    min-width: 36px;
+}
+.attach-btn:hover {
+    background: #666 !important;
+}
+.chatbox-attachment-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(233, 69, 96, 0.15);
+    border-top: 1px solid rgba(233, 69, 96, 0.3);
+    font-size: 12px;
+    color: #e94560;
+    flex-shrink: 0;
+}
+.chatbox-attachment-bar .attach-filename {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.chatbox-attachment-bar .attach-info {
+    color: #888;
+    font-size: 11px;
+}
+.chatbox-attachment-bar .remove-btn {
+    background: none;
+    border: 1px solid rgba(233, 69, 96, 0.4);
+    color: #e94560;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.chatbox-attachment-bar .remove-btn:hover {
+    background: #e94560;
+    color: #fff;
+}
+.chatbox-error {
+    color: #e94560;
+    font-size: 12px;
+    padding: 4px 12px;
+    flex-shrink: 0;
+}
 .chatbox-input-row input:disabled, .chatbox-input-row button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
@@ -218,8 +386,16 @@ class ChatboxPlugin(PluginBase):
             输入文字或直接说话进行对话
         </div>
     </div>
+    <div class="chatbox-attachment-bar" id="attachBar" style="display:none">
+        <span>📎</span>
+        <span class="attach-filename" id="attachName"></span>
+        <span class="attach-info" id="attachInfo"></span>
+        <button class="remove-btn" onclick="clearAttachment()">✕ 移除</button>
+    </div>
+    <div class="chatbox-error" id="attachError" style="display:none"></div>
     <div class="chatbox-status idle" id="chatboxStatus">空闲 — 可以输入</div>
     <div class="chatbox-input-row">
+        <button id="attachBtn" class="attach-btn" onclick="attachFile()">📎</button>
         <button id="listenBtn" class="listen-btn" onclick="toggleListening()">⚪ 静音中</button>
         <input id="chatboxInput" type="text" placeholder="输入消息..." autofocus />
         <button id="chatboxSendBtn">发送</button>
@@ -236,6 +412,74 @@ class ChatboxPlugin(PluginBase):
     var nextIndex = 0;
     var hasMessages = false;
     var isListening = false;
+
+    // --- 文件附件 ---
+    window.attachFile = function() {
+        try {
+            pywebview.api.select_file('').then(function(filePath) {
+                if (!filePath) return;  // 用户取消
+                return pywebview.api.call_plugin('chatbox', 'attach_file', filePath);
+            }).then(function(raw) {
+                if (!raw) return;
+                var data = JSON.parse(raw);
+                if (data.success) {
+                    updateAttachmentBar(data.filename, data.char_count, data.warning);
+                } else {
+                    showAttachError(data.error);
+                }
+            }).catch(function(e) { console.error(e); });
+        } catch(e) { console.error(e); }
+    }
+
+    window.clearAttachment = function() {
+        try {
+            pywebview.api.call_plugin('chatbox', 'clear_attachment').then(function() {
+                hideAttachmentBar();
+            }).catch(function(e) { console.error(e); });
+        } catch(e) { console.error(e); }
+    }
+
+    function updateAttachmentBar(filename, charCount, warning) {
+        var bar = document.getElementById('attachBar');
+        var nameEl = document.getElementById('attachName');
+        var infoEl = document.getElementById('attachInfo');
+        nameEl.textContent = filename;
+        infoEl.textContent = '(' + charCount + ' 字符)';
+        bar.style.display = 'flex';
+        hideAttachError();
+        if (warning) showAttachError(warning);
+    }
+
+    function hideAttachmentBar() {
+        document.getElementById('attachBar').style.display = 'none';
+    }
+
+    function showAttachError(msg) {
+        var el = document.getElementById('attachError');
+        el.textContent = '❌ ' + msg;
+        el.style.display = 'block';
+        setTimeout(function() { hideAttachError(); }, 5000);
+    }
+
+    function hideAttachError() {
+        document.getElementById('attachError').style.display = 'none';
+    }
+
+    // 轮询附件状态
+    function pollAttachment() {
+        try {
+            pywebview.api.call_plugin('chatbox', 'get_attachment_status').then(function(raw) {
+                var data = JSON.parse(raw);
+                if (data.attached) {
+                    updateAttachmentBar(data.filename, data.char_count);
+                } else {
+                    hideAttachmentBar();
+                }
+            }).catch(function(){});
+        } catch(e) {}
+    }
+    setInterval(pollAttachment, 2000);
+    pollAttachment();
 
     // --- 聆听控制 ---
     window.toggleListening = function() {

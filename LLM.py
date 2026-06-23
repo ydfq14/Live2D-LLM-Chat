@@ -159,6 +159,8 @@ class LLMManager:
                 {
                     # 工具调用唯一ID
                     "id": tc.id,
+                    # 工具类型（DeepSeek API 需要此字段）
+                    "type": "function",
                     # 工具函数信息：函数名、入参JSON字符串
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                 }
