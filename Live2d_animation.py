@@ -199,6 +199,15 @@ class Live2DAnimationManager:
                 ctypes.wintypes.LPARAM              # lParam：指向 MSLLHOOKSTRUCT 的指针
             )
 
+            # 显式设置 CallNextHookEx 的参数类型，避免 64 位系统上默认转换溢出
+            ctypes.windll.user32.CallNextHookEx.argtypes = [
+                ctypes.wintypes.HHOOK,
+                ctypes.c_int,
+                ctypes.wintypes.WPARAM,
+                ctypes.wintypes.LPARAM,
+            ]
+            ctypes.windll.user32.CallNextHookEx.restype = ctypes.wintypes.LPARAM
+
             def _low_level_mouse_proc(nCode, wParam, lParam):
                 """低级鼠标钩子回调：处理鼠标事件用于窗口拖动"""
                 try:
