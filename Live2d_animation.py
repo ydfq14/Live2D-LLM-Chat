@@ -8,8 +8,11 @@ import OpenGL.GL as gl
 import pyautogui
 # 导入pygame混音模块，用于音频加载与播放
 import pygame
-# 导入ctypes，调用Windows原生User32 API修改窗口扩展样式（穿透、分层）
+# 导入ctypes，调用Windows原生User32 API修改窗口扩展样式、安装低级钩子
 import ctypes
+import ctypes.wintypes
+# 导入threading，用于在后台线程运行全局鼠标钩子消息泵
+import threading
 # 导入pydub音频工具，用于解析wav音频、分段提取音量RMS值
 from pydub import AudioSegment
 # 导入Live2D V3核心类与全局初始化/销毁/渲染工具函数
@@ -28,7 +31,27 @@ WS_EX_LAYERED = 0x00080000
 # 鼠标穿透标识：窗口区域鼠标事件穿透到下层桌面/窗口
 WS_EX_TRANSPARENT = 0x00000020
 
-# ===================== Live2D眨眼状态枚举常量（预留扩展） =====================
+# ===================== Windows 低级鼠标钩子常量 =====================
+# 低级鼠标钩子类型（系统全局，不依赖窗口焦点）
+WH_MOUSE_LL = 14
+# 鼠标消息：右键按下
+WM_RBUTTONDOWN = 0x0204
+# 鼠标消息：右键松开
+WM_RBUTTONUP   = 0x0205
+# 鼠标消息：鼠标移动
+WM_MOUSEMOVE   = 0x0200
+
+# MSLLHOOKSTRUCT：低级鼠标钩子传入的事件数据结构
+class MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("pt",      ctypes.wintypes.POINT),   # 鼠标屏幕坐标
+        ("mouseData",   ctypes.wintypes.DWORD),
+        ("flags",       ctypes.wintypes.DWORD),
+        ("time",        ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
 # 无眨眼动作
 BLINK_STATE_NONE = 0
 # 闭眼过程中
@@ -61,6 +84,20 @@ class Live2DAnimationManager:
         # 渲染循环运行总开关，True持续渲染，False退出循环
         self.running = True
 
+        # ===================== 全局鼠标拖动相关参数 =====================
+        # 是否正在拖动窗口
+        self._dragging = False
+        # 拖动开始时的鼠标屏幕全局坐标
+        self._drag_start_mouse = (0, 0)
+        # 拖动开始时的窗口左上角屏幕坐标（由渲染循环在拖动初始化帧写入）
+        self._drag_start_win = (0, 0)
+        # 钩子记录的拖动起始鼠标坐标（右键按下瞬间记录）
+        self._pending_drag_mouse = (0, 0)
+
+        # 请求在渲染线程切换鼠标穿透/捕获（由钩子线程设置，渲染线程执行）
+        self._request_capture = False
+        self._request_release = False
+
         # ===================== 鼠标跟随相关参数初始化 =====================
         # 获取程序启动时初始鼠标坐标，记录上一帧鼠标位置
         self.last_mouse_x, self.last_mouse_y = pyautogui.position()
@@ -84,6 +121,15 @@ class Live2DAnimationManager:
         self.gaze_y = 0.0
         # 鼠标移动时视线平滑缓动系数，数值越大跟随越快
         self.GAZE_EASING = 0.02
+
+        # ===================== 拖动相关状态标识 =====================
+        # 是否需要在下次渲染循环中初始化拖动参数
+        self._need_drag_init = False
+        # 是否有待处理的窗口移动事件
+        self._has_pending_move = False
+        # 记录待处理的窗口目标位置（拖动中更新，避免重复计算）
+        self._pending_win_x = 0
+        self._pending_win_y = 0
 
     # 配置GLFW窗口Windows原生属性：透明分层、鼠标穿透
     def configure_window(self, window, width, height):
@@ -112,6 +158,152 @@ class Live2DAnimationManager:
         screen_width, screen_height = pyautogui.size()
         # 设置窗口位置：贴屏幕底部，左上角坐标(0, 屏幕高度-窗口高度)
         glfw.set_window_pos(window, 0, screen_height - height)
+
+    # 判断屏幕坐标 (sx, sy) 是否落在 Live2D 窗口范围内（纯 Win32，钩子回调安全）
+    def _is_over_window(self, sx, sy):
+        """
+        命中测试：使用 Win32 GetWindowRect 获取窗口矩形，
+        完全不调用 GLFW，可在钩子回调线程中安全使用。
+        :param sx: 鼠标屏幕X坐标
+        :param sy: 鼠标屏幕Y坐标
+        :return: True 表示命中窗口区域
+        """
+        if self._hwnd is None:
+            return False
+        rect = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
+        return rect.left <= sx < rect.right and rect.top <= sy < rect.bottom
+
+    # 构造 WH_MOUSE_LL 低级钩子回调，支持事件拦截
+    def _build_hook_proc(self):
+        """
+        构造低级鼠标钩子回调函数（LowLevelMouseProc）。
+
+        与 pynput 不同，此钩子可通过返回非零值完全拦截事件，
+        使右键拖动时下层窗口完全收不到任何鼠标消息。
+        """
+        # 使用 pynput 实现全局鼠标监听（在 Windows 下底层仍会使用 SetWindowsHookEx）
+        # 如果 pynput 不可用，则保留旧的低级钩子实现（在 _start_global_mouse_listener 中处理）。
+        try:
+            from pynput import mouse as pynput_mouse  # type: ignore
+        except Exception:
+            # pynput 不可用，保持旧行为（_start_global_mouse_listener 会安装低级钩子）
+            self._pynput_available = False
+            self._pynput_listener = None
+            return
+
+        self._pynput_available = True
+
+        # 回调运行在 pynput 的线程中，必须尽量简短
+        def _on_move(x, y):
+            try:
+                if self._dragging and not self._need_drag_init:
+                    dx = int(x) - self._pending_drag_mouse[0]
+                    dy = int(y) - self._pending_drag_mouse[1]
+                    self._pending_win_x = self._drag_start_win[0] + dx
+                    self._pending_win_y = self._drag_start_win[1] + dy
+                    self._has_pending_move = True
+            except Exception:
+                pass
+
+        def _on_click(x, y, button, pressed):
+            try:
+                if button == getattr(pynput_mouse.Button, 'right'):
+                    sx, sy = int(x), int(y)
+                    if pressed:
+                        # 仅请求渲染线程关闭穿透并开始拖动（避免钩子线程直接修改窗口样式）
+                        if self._is_over_window(sx, sy):
+                            self._pending_drag_mouse = (sx, sy)
+                            self._need_drag_init = True   # 新增：通知渲染线程在下一帧初始化拖拽起点
+                            self._request_capture = True
+                    else:
+                        # 请求渲染线程恢复穿透并结束拖动
+                        if self._dragging or getattr(self, '_request_capture', False):
+                            self._request_release = True
+            except Exception:
+                pass
+
+        # 创建并保存监听器对象（不立即启动）
+        self._pynput_listener = pynput_mouse.Listener(on_move=_on_move, on_click=_on_click)
+
+    # 在后台守护线程中安装钩子并运行 Windows 消息泵
+    def _start_global_mouse_listener(self):
+        """
+        安装 WH_MOUSE_LL 低级鼠标钩子并在独立守护线程运行消息泵。
+
+        低级钩子要求安装线程必须持续运行 Windows 消息循环，
+        否则系统会在约 200ms 后自动超时卸载钩子。
+        使用 daemon 线程隔离，不阻塞渲染主循环。
+        """
+        # 构建钩子/监听器对象（pynput 或 低级钩子）
+        self._build_hook_proc()
+
+        # 如果构建时检测到 pynput 可用，则直接启动 pynput 监听器并返回
+        if getattr(self, "_pynput_available", False) and getattr(self, "_pynput_listener", None):
+            try:
+                self._pynput_listener.start()
+                logger.info("💡 使用 pynput 全局鼠标监听（右键拖拽移动窗口）")
+            except Exception as e:
+                logger.exception("启动 pynput 监听器失败: %s", e)
+            return
+
+        # 否则继续使用原来的 WH_MOUSE_LL 方式安装低级钩子
+        def hook_thread_main():
+            user32 = ctypes.windll.user32
+            # use_last_error=True 让 ctypes 同步 Windows 错误码到 get_last_error()
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+            # WH_MOUSE_LL 低级钩子要求 hMod 必须为 NULL（0）
+            # 传入模块句柄反而会导致安装失败，这是 Windows 的特殊规定
+            user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
+            user32.SetWindowsHookExW.argtypes = [
+                ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.wintypes.HINSTANCE,
+                ctypes.wintypes.DWORD,
+            ]
+            self._hook_handle = user32.SetWindowsHookExW(
+                WH_MOUSE_LL,
+                self._hook_proc,
+                None,  # WH_MOUSE_LL 必须传 NULL，传模块句柄会导致失败
+                0,     # 0 = 全局钩子（监听所有线程）
+            )
+            if not self._hook_handle:
+                err = ctypes.get_last_error()
+                logger.error(f"WH_MOUSE_LL 钩子安装失败！错误码: {err}")
+                return
+
+            logger.info("💡 提示：在形象上右键拖拽即可移动窗口（不会影响其他窗口的右键菜单）")
+
+            # 消息泵：用阻塞式 GetMessageW 驱动钩子回调
+            msg = ctypes.wintypes.MSG()
+            while self.running:
+                ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if ret == 0 or ret == -1:
+                    break
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+
+            user32.UnhookWindowsHookEx(self._hook_handle)
+            self._hook_handle = None
+            logger.debug("WH_MOUSE_LL 钩子已卸载")
+
+        self._hook_thread = threading.Thread(target=hook_thread_main, daemon=True, name="mouse-hook")
+        self._hook_thread.start()
+
+    # 停止钩子线程
+    def _stop_global_mouse_listener(self):
+        """向钩子线程投递 WM_QUIT 让 GetMessageW 解除阻塞，然后等待线程退出"""
+        self.running = False
+        if self._hook_thread and self._hook_thread.is_alive():
+            # PostThreadMessageW 发 WM_QUIT(0x0012) 唤醒阻塞中的 GetMessageW
+            tid = ctypes.windll.kernel32.GetThreadId(
+                ctypes.windll.kernel32.OpenThread(0x0040, False, self._hook_thread.ident)
+            ) if hasattr(self._hook_thread, "ident") else 0
+            if tid:
+                ctypes.windll.user32.PostThreadMessageW(tid, 0x0012, 0, 0)
+            self._hook_thread.join(timeout=2.0)
+            logger.debug("鼠标钩子线程已结束")
 
     # 根据路径加载Live2D模型并适配窗口尺寸
     def load_live2d_model(self, width, height):
@@ -161,6 +353,13 @@ class Live2DAnimationManager:
 
         # 调用自定义方法配置窗口透明、鼠标穿透、底部贴边
         self.configure_window(self.window, window_width, window_height)
+
+        # 缓存 HWND 供钩子回调使用（钩子线程不能调用 GLFW）
+        self._hwnd = glfw.get_win32_window(self.window)
+
+        # ===== 启动全局鼠标监听器（系统钩子，无需窗口焦点）=====
+        self._start_global_mouse_listener()
+
         # Live2D专用OpenGL函数初始化，绑定底层渲染接口
         glInit()
 
@@ -189,6 +388,10 @@ class Live2DAnimationManager:
 
             # 获取当前窗口帧缓冲实际宽高（适配窗口缩放）
             width, height = glfw.get_framebuffer_size(self.window)
+            # 帧缓冲尺寸为0时（窗口最小化或尚未就绪），跳过本帧避免除零错误
+            if width == 0 or height == 0:
+                glfw.poll_events()
+                continue
             # 设置OpenGL视口：渲染区域铺满整个窗口
             gl.glViewport(0, 0, width, height)
             # Live2D专用缓冲清空，清除透明背景残留
@@ -198,6 +401,45 @@ class Live2DAnimationManager:
             self.model.Update()
             # 设置模型嘴型参数，绑定self.mouth_value，插值权重1立即生效
             self.model.SetParameterValue("ParamMouthOpenY", self.mouth_value, 1)
+
+            # ===== 渲染循环执行窗口拖动（钩子线程只写坐标，此处读取并移动）=====
+            # 处理钩子线程请求：在渲染线程安全地切换鼠标穿透样式
+            if getattr(self, '_request_capture', False):
+                try:
+                    # 关闭 WS_EX_TRANSPARENT，使窗口接受鼠标事件
+                    ex = ctypes.windll.user32.GetWindowLongW(self._hwnd, GWL_EXSTYLE)
+                    ex &= ~WS_EX_TRANSPARENT
+                    ctypes.windll.user32.SetWindowLongW(self._hwnd, GWL_EXSTYLE, ex)
+                    # 读取窗口当前位置作为拖动起点
+                    rect = ctypes.wintypes.RECT()
+                    ctypes.windll.user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
+                    self._drag_start_win = (rect.left, rect.top)
+                    self._dragging = True
+                except Exception:
+                    pass
+                self._request_capture = False
+
+            if getattr(self, '_request_release', False):
+                try:
+                    # 恢复鼠标穿透
+                    ex = ctypes.windll.user32.GetWindowLongW(self._hwnd, GWL_EXSTYLE)
+                    ex |= WS_EX_TRANSPARENT
+                    ctypes.windll.user32.SetWindowLongW(self._hwnd, GWL_EXSTYLE, ex)
+                    self._dragging = False
+                    self._has_pending_move = False
+                except Exception:
+                    pass
+                self._request_release = False
+
+            if self._need_drag_init:
+                # 右键刚按下：在渲染线程读取窗口当前坐标作为拖动起点
+                wx, wy = glfw.get_window_pos(self.window)
+                self._drag_start_win = (wx, wy)
+                self._need_drag_init = False
+            if self._has_pending_move:
+                glfw.set_window_pos(self.window, self._pending_win_x, self._pending_win_y)
+                self._has_pending_move = False
+            # ===== 拖动执行结束 =====
 
             # 调用视线追踪逻辑，更新头部跟随鼠标参数
             self.update_gaze_tracking(width, height)
@@ -209,6 +451,10 @@ class Live2DAnimationManager:
             # 轮询窗口事件（鼠标移动、窗口关闭、按键等）
             glfw.poll_events()
 
+        # 渲染循环已退出，标记 running=False 确保钩子线程感知到退出信号
+        self.running = False
+        # 循环退出后停止全局鼠标监听器，释放系统钩子
+        self._stop_global_mouse_listener()
         # 循环退出后停止所有音频播放
         pygame.mixer.music.stop()
         # 销毁pygame混音器，释放音频设备资源
