@@ -42,3 +42,6 @@ LLM_env/conversation_history.txt
 # --- 插件数据目录 ---
 !plugins_data/.gitkeep
 .vscode/settings.json
+
+models/
+safety_db/
