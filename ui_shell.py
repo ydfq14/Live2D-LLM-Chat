@@ -212,12 +212,13 @@ class UIShell:
         tab_panels: list[str] = []
         for i, plugin in enumerate(ui_plugins):
             active_cls = "active" if i == 0 else ""
-            display = "block" if i == 0 else "none"
+            icon = getattr(plugin, 'tab_icon', '')
             tab_buttons.append(
-                f'<button class="tab-btn {active_cls}" onclick="switchTab({i})">{plugin.name}</button>'
+                f'<button class="tab-btn {active_cls}" onclick="switchTab({i})">'
+                f'<span class="tab-icon">{icon}</span>{plugin.name}</button>'
             )
             tab_panels.append(
-                f'<div class="tab-panel" id="panel-{i}" style="display:{display}">'
+                f'<div class="tab-panel" id="panel-{i}">'
                 f'{plugin.get_frontend_html()}'
                 f'</div>'
             )
@@ -230,18 +231,60 @@ class UIShell:
 <title>VirtuMate 助手面板</title>
 <style>
 :root {{
-    --bg: #1a1a2e;
-    --surface: #16213e;
+    /* 基础调色板 */
+    --bg: #0a0a1a;
+    --bg-deep: #05050f;
+    --surface: #111128;
+    --surface-hover: #181840;
     --primary: #0f3460;
+    --primary-light: #1a4a80;
     --accent: #e94560;
-    --text: #eee;
-    --text-muted: #aaa;
+    --accent-glow: #ff2d55;
+    --text: #e8e8f0;
+    --text-muted: #7a7a9e;
     --radius: 8px;
+
+    /* 赛博朋克霓虹色彩 */
+    --neon-cyan: #00f0ff;
+    --neon-pink: #ff2d95;
+    --neon-purple: #b94eff;
+    --neon-green: #39ff14;
+    --neon-orange: #ff6b35;
+
+    /* 发光效果颜色 */
+    --glow-cyan: rgba(0, 240, 255, 0.4);
+    --glow-pink: rgba(255, 45, 149, 0.4);
+    --glow-accent: rgba(233, 69, 96, 0.5);
+
+    /* 表面层次 */
+    --surface-0: #0a0a1a;
+    --surface-1: #111128;
+    --surface-2: #1a1a3a;
+    --surface-3: #222250;
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-glow: rgba(0, 240, 255, 0.2);
+
+    /* 渐变 */
+    --gradient-primary: linear-gradient(135deg, #0f3460 0%, #1a1a3a 100%);
+    --gradient-accent: linear-gradient(135deg, #e94560 0%, #b94eff 100%);
+    --gradient-surface: linear-gradient(180deg, #111128 0%, #0a0a1a 100%);
+
+    /* 阴影 */
+    --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 1px rgba(0, 240, 255, 0.1);
+    --shadow-glow: 0 0 15px var(--glow-cyan), 0 0 40px rgba(0, 240, 255, 0.1);
+
+    /* 动画时间 */
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }}
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
     background: var(--bg);
+    background-image:
+        radial-gradient(ellipse at 20% 80%, rgba(15, 52, 96, 0.3) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(185, 78, 255, 0.08) 0%, transparent 50%);
     color: var(--text);
     display: flex;
     flex-direction: column;
@@ -250,39 +293,104 @@ body {{
 }}
 .tab-bar {{
     display: flex;
-    background: var(--surface);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: rgba(17, 17, 40, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-glow);
     flex-shrink: 0;
+    position: relative;
+}}
+.tab-bar::after {{
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        var(--neon-cyan) 20%,
+        var(--neon-pink) 50%,
+        var(--neon-cyan) 80%,
+        transparent 100%);
+    opacity: 0.3;
 }}
 .tab-btn {{
     flex: 1;
-    padding: 12px 8px;
+    padding: 14px 8px;
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--transition-normal);
     border-bottom: 2px solid transparent;
+    position: relative;
+    letter-spacing: 0.02em;
 }}
-.tab-btn:hover {{ color: var(--text); }}
+.tab-btn:hover {{
+    color: var(--text);
+    background: rgba(0, 240, 255, 0.03);
+}}
+.tab-icon {{
+    display: inline-block;
+    margin-right: 6px;
+    font-size: 14px;
+}}
 .tab-btn.active {{
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-    background: rgba(233,69,96,0.05);
+    color: var(--neon-cyan);
+    border-bottom-color: var(--neon-cyan);
+    background: rgba(0, 240, 255, 0.05);
+    text-shadow: 0 0 8px var(--glow-cyan);
+}}
+.tab-btn.active::after {{
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 10%;
+    right: 10%;
+    height: 2px;
+    background: var(--neon-cyan);
+    box-shadow: 0 0 8px var(--glow-cyan), 0 0 20px var(--glow-cyan);
+    border-radius: 1px;
 }}
 .content {{
     flex: 1;
     overflow-y: auto;
     padding: 16px;
+    position: relative;
+    overflow-x: hidden;
 }}
 .tab-panel {{
     height: 100%;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity var(--transition-normal), transform var(--transition-normal);
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    contain: content;
+}}
+.tab-panel.active {{
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
 }}
 /* 滚动条美化 */
-.content::-webkit-scrollbar {{ width: 6px; }}
+.content::-webkit-scrollbar {{ width: 4px; }}
 .content::-webkit-scrollbar-track {{ background: transparent; }}
-.content::-webkit-scrollbar-thumb {{ background: var(--primary); border-radius: 3px; }}
+.content::-webkit-scrollbar-thumb {{
+    background: var(--primary-light);
+    border-radius: 2px;
+}}
+.content::-webkit-scrollbar-thumb:hover {{
+    background: var(--neon-cyan);
+    box-shadow: 0 0 6px var(--glow-cyan);
+}}
 </style>
 </head>
 <body>
@@ -298,9 +406,16 @@ function switchTab(idx) {{
         btn.classList.toggle('active', i === idx);
     }});
     document.querySelectorAll('.tab-panel').forEach((panel,i) => {{
-        panel.style.display = i === idx ? 'block' : 'none';
+        panel.classList.toggle('active', i === idx);
     }});
 }}
+// 初始化第一个 Tab 为活跃状态
+document.addEventListener('DOMContentLoaded', function() {{
+    const firstPanel = document.querySelector('.tab-panel');
+    if (firstPanel) {{
+        firstPanel.classList.add('active');
+    }}
+}});
 </script>
 </body>
 </html>"""

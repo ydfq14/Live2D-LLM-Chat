@@ -34,6 +34,8 @@ class PluginBase:
     name: str = "base"
     # 插件版本号，默认占位值，子类必须重写
     version: str = "1.0"
+    # Tab 图标（emoji 或 unicode 字符），子类可覆写
+    tab_icon: str = ""
 
     def __init__(self) -> None:
         """插件实例初始化构造函数"""

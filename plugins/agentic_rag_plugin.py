@@ -136,6 +136,7 @@ class AgenticRAGPlugin(PluginBase):
 
     name = "agentic_rag"
     version = "2.0"
+    tab_icon = "📚"
 
     def __init__(self) -> None:
         super().__init__()
@@ -475,40 +476,85 @@ class AgenticRAGPlugin(PluginBase):
         agent_status = "已缓存" if self._agent else "待创建"
         return f"""
         <style>
-            .kb-section {{ margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }}
+            .kb-section {{ margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-glow, rgba(0, 240, 255, 0.2)); }}
             .kb-btn {{
-                padding: 8px 16px; border: none; border-radius: 6px;
-                background: #e94560; color: #fff; font-size: 12px;
-                cursor: pointer; transition: background 0.2s;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 6px;
+                background: var(--gradient-accent, linear-gradient(135deg, #e94560, #b94eff));
+                color: #fff;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all var(--transition-fast, 0.15s ease);
+                box-shadow: 0 2px 10px rgba(233, 69, 96, 0.3);
             }}
-            .kb-btn:hover {{ background: #c73e54; }}
-            .kb-btn:disabled {{ background: #555; cursor: not-allowed; }}
+            .kb-btn:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 4px 16px rgba(233, 69, 96, 0.5);
+            }}
+            .kb-btn:disabled {{
+                background: var(--surface-3, #222250);
+                cursor: not-allowed;
+                box-shadow: none;
+            }}
             .kb-file-list {{ max-height: 200px; overflow-y: auto; margin-top: 8px; }}
             .kb-file-item {{
-                display: flex; justify-content: space-between; align-items: center;
-                padding: 6px 8px; background: rgba(255,255,255,0.05);
-                border-radius: 4px; margin-bottom: 4px; font-size: 12px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 6px 8px;
+                background: var(--surface-1, #111128);
+                border-radius: 4px;
+                margin-bottom: 4px;
+                font-size: 12px;
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+                transition: all var(--transition-normal, 0.3s cubic-bezier(0.4, 0, 0.2, 1));
             }}
-            .kb-file-name {{ color: #eee; flex: 1; }}
-            .kb-file-chunks {{ color: #888; font-size: 11px; margin-right: 8px; }}
+            .kb-file-item:hover {{
+                border-color: var(--border-glow, rgba(0, 240, 255, 0.2));
+                background: var(--surface-2, #1a1a3a);
+            }}
+            .kb-file-name {{ color: var(--text, #e8e8f0); flex: 1; }}
+            .kb-file-chunks {{ color: var(--text-muted, #7a7a9e); font-size: 11px; margin-right: 8px; }}
             .kb-file-delete {{
-                padding: 2px 8px; border: 1px solid #e94560; border-radius: 4px;
-                background: transparent; color: #e94560; font-size: 11px;
-                cursor: pointer; transition: all 0.2s;
+                padding: 2px 8px;
+                border: 1px solid rgba(233, 69, 96, 0.3);
+                border-radius: 4px;
+                background: transparent;
+                color: var(--accent, #e94560);
+                font-size: 11px;
+                cursor: pointer;
+                transition: all var(--transition-fast, 0.15s ease);
             }}
-            .kb-file-delete:hover {{ background: #e94560; color: #fff; }}
+            .kb-file-delete:hover {{
+                background: var(--accent, #e94560);
+                color: #fff;
+                box-shadow: 0 0 10px rgba(233, 69, 96, 0.4);
+            }}
             .kb-upload-area {{
-                border: 2px dashed rgba(255,255,255,0.2); border-radius: 8px;
-                padding: 20px; text-align: center; margin-top: 12px;
-                cursor: pointer; transition: border-color 0.2s;
+                border: 2px dashed rgba(0, 240, 255, 0.3);
+                border-radius: 8px;
+                padding: 20px;
+                text-align: center;
+                margin-top: 12px;
+                cursor: pointer;
+                transition: all var(--transition-normal, 0.3s cubic-bezier(0.4, 0, 0.2, 1));
             }}
-            .kb-upload-area:hover {{ border-color: #e94560; }}
-            .kb-upload-area.dragover {{ border-color: #e94560; background: rgba(233,69,96,0.1); }}
+            .kb-upload-area:hover {{
+                border-color: var(--neon-cyan, #00f0ff);
+                background: rgba(0, 240, 255, 0.05);
+                box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+            }}
+            .kb-upload-area.dragover {{
+                border-color: var(--neon-cyan, #00f0ff);
+                background: rgba(0, 240, 255, 0.1);
+                box-shadow: 0 0 30px rgba(0, 240, 255, 0.2);
+            }}
             #kbFileInput {{ display: none; }}
         </style>
 
-        <div style="padding:12px; color:#eee; font-family:system-ui,sans-serif">
-            <h3 style="color:#e94560; margin-bottom:12px">📚 知识库 (Agentic RAG)</h3>
+        <div style="padding:12px; color:var(--text, #e8e8f0); font-family:system-ui,sans-serif">
+            <h3 style="color:var(--neon-cyan, #00f0ff); margin-bottom:12px; text-shadow: 0 0 10px var(--glow-cyan, rgba(0, 240, 255, 0.4))">📚 知识库 (Agentic RAG)</h3>
 
             <div class="kb-section">
                 <p style="color:#aaa; font-size:13px">

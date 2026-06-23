@@ -100,6 +100,7 @@ class SchedulerPlugin(PluginBase):
 
     name = "scheduler"
     version = "1.0"
+    tab_icon = "📅"
 
     # 动态间隔策略：根据最近任务时间自动调整检查频率
     INTERVAL_NORMAL = 120      # 普通间隔：120秒
@@ -518,32 +519,110 @@ class SchedulerPlugin(PluginBase):
         return r"""
 <style>
 .scheduler-wrap { padding: 12px; }
-.scheduler-title { font-size: 16px; font-weight: bold; color: #e94560; margin-bottom: 12px; }
-.scheduler-empty { color: #888; text-align: center; margin-top: 40px; font-size: 13px; }
+.scheduler-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--neon-cyan, #00f0ff);
+    margin-bottom: 12px;
+    text-shadow: 0 0 10px var(--glow-cyan, rgba(0, 240, 255, 0.4));
+}
+.scheduler-empty {
+    color: var(--text-muted, #7a7a9e);
+    text-align: center;
+    margin-top: 40px;
+    font-size: 13px;
+}
 .scheduler-list { display: flex; flex-direction: column; gap: 8px; }
 .scheduler-item {
-    background: #16213e; border-radius: 8px; padding: 10px 12px;
-    display: flex; justify-content: space-between; align-items: center;
+    background: var(--surface-1, #111128);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    transition: all var(--transition-normal, 0.3s cubic-bezier(0.4, 0, 0.2, 1));
+    position: relative;
+    overflow: hidden;
 }
+.scheduler-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--neon-cyan, #00f0ff), transparent);
+    opacity: 0;
+    transition: opacity var(--transition-normal, 0.3s cubic-bezier(0.4, 0, 0.2, 1));
+}
+.scheduler-item:hover {
+    border-color: var(--border-glow, rgba(0, 240, 255, 0.2));
+    box-shadow: var(--shadow-card, 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 1px rgba(0, 240, 255, 0.1));
+    transform: translateY(-1px);
+}
+.scheduler-item:hover::before { opacity: 1; }
 .scheduler-item-info { flex: 1; }
-.scheduler-item-time { color: #e94560; font-size: 12px; }
-.scheduler-item-title { color: #eee; font-size: 13px; margin-top: 2px; }
-.scheduler-item-actions button {
-    background: none; border: 1px solid rgba(255,255,255,0.15);
-    color: #aaa; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+.scheduler-item-time {
+    color: var(--neon-cyan, #00f0ff);
+    font-size: 12px;
 }
-.scheduler-item-actions button:hover { border-color: #e94560; color: #e94560; }
+.scheduler-item-title {
+    color: var(--text, #e8e8f0);
+    font-size: 13px;
+    margin-top: 2px;
+}
+.scheduler-item-actions button {
+    background: none;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    color: var(--text-muted, #7a7a9e);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--transition-fast, 0.15s ease);
+}
+.scheduler-item-actions button:hover {
+    border-color: var(--neon-cyan, #00f0ff);
+    color: var(--neon-cyan, #00f0ff);
+    box-shadow: 0 0 8px rgba(0, 240, 255, 0.3);
+}
 .scheduler-add-row {
-    display: flex; gap: 6px; margin-top: 12px;
-    border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    border-top: 1px solid var(--border-glow, rgba(0, 240, 255, 0.2));
+    padding-top: 10px;
 }
 .scheduler-add-row input {
-    flex: 1; padding: 6px 10px; border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 6px; background: #16213e; color: #eee; font-size: 12px; outline: none;
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    border-radius: 6px;
+    background: var(--surface-2, #1a1a3a);
+    color: var(--text, #e8e8f0);
+    font-size: 12px;
+    outline: none;
+    transition: all var(--transition-normal, 0.3s cubic-bezier(0.4, 0, 0.2, 1));
+}
+.scheduler-add-row input:focus {
+    border-color: var(--neon-cyan, #00f0ff);
+    box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.15);
 }
 .scheduler-add-row button {
-    padding: 6px 14px; border: none; border-radius: 6px;
-    background: #e94560; color: #fff; font-size: 12px; cursor: pointer;
+    padding: 6px 14px;
+    border: none;
+    border-radius: 6px;
+    background: var(--gradient-accent, linear-gradient(135deg, #e94560, #b94eff));
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--transition-fast, 0.15s ease);
+    box-shadow: 0 2px 8px rgba(233, 69, 96, 0.3);
+}
+.scheduler-add-row button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(233, 69, 96, 0.5);
 }
 </style>
 <div class="scheduler-wrap">

@@ -46,6 +46,7 @@ class ChatboxPlugin(PluginBase):
 
     name = "chatbox"
     version = "1.0"
+    tab_icon = "💬"
 
     def __init__(self) -> None:
         super().__init__()
@@ -252,78 +253,123 @@ class ChatboxPlugin(PluginBase):
     font-size: 13px;
     line-height: 1.5;
     word-break: break-word;
+    animation: bubbleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+@keyframes bubbleIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+@keyframes bubbleInUser {
+    from {
+        opacity: 0;
+        transform: translateX(20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
 }
 .chatbox-msg.user {
     align-self: flex-end;
-    background: #e94560;
+    background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
     color: #fff;
     border-bottom-right-radius: 4px;
+    box-shadow: 0 2px 12px rgba(233, 69, 96, 0.3);
+    animation-name: bubbleInUser;
 }
 .chatbox-msg.assistant {
     align-self: flex-start;
-    background: #16213e;
+    background: linear-gradient(135deg, #1a1a3a 0%, #16213e 100%);
     color: #eee;
     border-bottom-left-radius: 4px;
+    border-left: 2px solid var(--neon-cyan, #00f0ff);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 .chatbox-input-row {
     display: flex;
     gap: 8px;
     padding: 8px 4px 0 4px;
-    border-top: 1px solid rgba(255,255,255,0.08);
+    border-top: 1px solid var(--border-glow, rgba(0, 240, 255, 0.2));
     flex-shrink: 0;
 }
 .chatbox-input-row input {
     flex: 1;
-    padding: 8px 12px;
-    border: 1px solid rgba(255,255,255,0.12);
+    padding: 10px 16px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
     border-radius: 20px;
-    background: #16213e;
-    color: #eee;
+    background: var(--surface-2, #1a1a3a);
+    color: var(--text, #e8e8f0);
     font-size: 13px;
     outline: none;
-    transition: border-color 0.2s;
+    transition: all var(--transition-normal, 0.3s cubic-bezier(0.4, 0, 0.2, 1));
 }
 .chatbox-input-row input:focus {
-    border-color: #e94560;
+    border-color: var(--neon-cyan, #00f0ff);
+    box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.15), 0 0 15px rgba(0, 240, 255, 0.1);
+    background: var(--surface-3, #222250);
 }
 .chatbox-input-row button {
-    padding: 8px 16px;
+    padding: 10px 20px;
     border: none;
     border-radius: 20px;
-    background: #e94560;
+    background: var(--gradient-accent, linear-gradient(135deg, #e94560, #b94eff));
     color: #fff;
     font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: all var(--transition-fast, 0.15s ease);
+    box-shadow: 0 2px 10px rgba(233, 69, 96, 0.3);
+}
+.chatbox-input-row button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(233, 69, 96, 0.5);
+}
+.chatbox-input-row button:active {
+    transform: translateY(0);
 }
 .listen-btn {
-    padding: 8px 12px !important;
+    padding: 10px 12px !important;
     min-width: 90px;
     font-size: 12px !important;
-    background: #555 !important;
+    background: var(--surface-3, #222250) !important;
     white-space: nowrap;
+    box-shadow: none !important;
 }
 .listen-btn.enabled {
-    background: #e94560 !important;
+    background: var(--accent, #e94560) !important;
+    box-shadow: 0 0 15px rgba(233, 69, 96, 0.4) !important;
+    animation: recordPulse 1.5s infinite;
+}
+@keyframes recordPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(233, 69, 96, 0.6); }
+    50% { box-shadow: 0 0 0 8px rgba(233, 69, 96, 0); }
 }
 .attach-btn {
-    padding: 8px 10px !important;
+    padding: 10px 10px !important;
     font-size: 14px !important;
-    background: #444 !important;
+    background: var(--surface-2, #1a1a3a) !important;
     min-width: 36px;
+    box-shadow: none !important;
 }
 .attach-btn:hover {
-    background: #666 !important;
+    background: var(--surface-3, #222250) !important;
+    box-shadow: 0 2px 8px rgba(0, 240, 255, 0.2) !important;
 }
 .chatbox-attachment-bar {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
-    background: rgba(233, 69, 96, 0.15);
-    border-top: 1px solid rgba(233, 69, 96, 0.3);
+    background: rgba(233, 69, 96, 0.1);
+    border-top: 1px solid rgba(233, 69, 96, 0.2);
     font-size: 12px;
-    color: #e94560;
+    color: var(--accent, #e94560);
     flex-shrink: 0;
 }
 .chatbox-attachment-bar .attach-filename {
@@ -333,24 +379,26 @@ class ChatboxPlugin(PluginBase):
     white-space: nowrap;
 }
 .chatbox-attachment-bar .attach-info {
-    color: #888;
+    color: var(--text-muted, #7a7a9e);
     font-size: 11px;
 }
 .chatbox-attachment-bar .remove-btn {
     background: none;
-    border: 1px solid rgba(233, 69, 96, 0.4);
-    color: #e94560;
+    border: 1px solid rgba(233, 69, 96, 0.3);
+    color: var(--accent, #e94560);
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 11px;
     cursor: pointer;
+    transition: all var(--transition-fast, 0.15s ease);
 }
 .chatbox-attachment-bar .remove-btn:hover {
-    background: #e94560;
+    background: var(--accent, #e94560);
     color: #fff;
+    box-shadow: 0 0 10px rgba(233, 69, 96, 0.4);
 }
 .chatbox-error {
-    color: #e94560;
+    color: var(--accent, #e94560);
     font-size: 12px;
     padding: 4px 12px;
     flex-shrink: 0;
@@ -362,20 +410,31 @@ class ChatboxPlugin(PluginBase):
 .chatbox-status {
     text-align: center;
     font-size: 12px;
-    color: #e94560;
+    color: var(--neon-cyan, #00f0ff);
     padding: 4px 0;
     min-height: 20px;
     flex-shrink: 0;
+    animation: statusGlow 2s infinite;
+}
+@keyframes statusGlow {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
 }
 .chatbox-status.idle {
-    color: #4a9;
+    color: var(--neon-green, #39ff14);
+    animation: none;
 }
 .chatbox-empty {
-    color: #555;
+    color: var(--text-muted, #7a7a9e);
     text-align: center;
     margin-top: 60px;
     font-size: 13px;
     line-height: 1.8;
+    opacity: 0;
+    animation: fadeIn 0.8s 0.3s forwards;
+}
+@keyframes fadeIn {
+    to { opacity: 1; }
 }
 </style>
 
