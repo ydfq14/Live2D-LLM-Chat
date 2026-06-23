@@ -25,8 +25,6 @@ class AssistantToolsPlugin(PluginBase):
             if hasattr(app, "llm_manager"):
                 app.llm_manager.features = self.features
 
-        # 启动提醒后台线程（如果尚未启动）
-        self.features.start_reminders()
         logger.info("AssistantToolsPlugin 启动完成，features 已就绪")
 
     def on_register_tools(self) -> list[dict]:
@@ -35,41 +33,6 @@ class AssistantToolsPlugin(PluginBase):
         每个工具都定义 name、description、parameters（JSON schema）。
         """
         tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "add_reminder",
-                    "description": "添加提醒，参数包含 time (ISO or YYYY-MM-DD HH:MM) 与 text（提醒内容）",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "time": {"type": "string", "description": "ISO 或 'YYYY-MM-DD HH:MM'"},
-                            "text": {"type": "string", "description": "提醒文本"}
-                        },
-                        "required": ["time", "text"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_reminders",
-                    "description": "列出所有提醒，无参数",
-                    "parameters": {"type": "object", "properties": {}, "required": []}
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "remove_reminder",
-                    "description": "删除提醒，参数为提醒 id",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"id": {"type": "integer"}},
-                        "required": ["id"]
-                    }
-                }
-            },
             {
                 "type": "function",
                 "function": {
@@ -134,15 +97,6 @@ class AssistantToolsPlugin(PluginBase):
         GraphEngine 调用工具时执行此方法，返回字符串结果（或JSON序列化字符串）。
         """
         try:
-            if tool_name == "add_reminder":
-                rem = self.features.add_reminder(tool_args.get("time", ""), tool_args.get("text", ""))
-                return json.dumps(rem, ensure_ascii=False)
-            if tool_name == "list_reminders":
-                rems = self.features.list_reminders()
-                return json.dumps(rems, ensure_ascii=False)
-            if tool_name == "remove_reminder":
-                ok = self.features.remove_reminder(int(tool_args.get("id", 0)))
-                return json.dumps({"ok": bool(ok)})
             if tool_name == "tell_joke":
                 return self.features.tell_joke()
             if tool_name == "start_quiz":
