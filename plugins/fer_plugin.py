@@ -25,7 +25,7 @@ FER 插件 —— 面部情绪分析（Facial Emotion Recognition）独立模块
 
 插件接口：
 - on_startup：初始化 FER 分析器
-- on_tick：定期触发分析（每 10 轮）
+- on_tick：定期触发分析（每 2 轮）
 - on_user_input：可选，将面部情绪注入到用户输入上下文
 - get_frontend_html：前端面板显示当前情绪状态
 
@@ -393,12 +393,12 @@ class FERPlugin(PluginBase):
         )
 
     def on_tick(self, app) -> None:
-        """定期触发面部情绪分析（每 10 轮）。"""
+        """定期触发面部情绪分析（每 2 轮）。"""
         self._tick_count += 1
         logger.info("[FER] on_tick 触发，计数=%d", self._tick_count)
         
-        if self._tick_count % 10 != 0:
-            logger.info("[FER] 计数未到10，跳过")
+        if self._tick_count % 2 != 0:
+            logger.info("[FER] 计数未到2，跳过")
             return
 
         if not self.analyzer:
