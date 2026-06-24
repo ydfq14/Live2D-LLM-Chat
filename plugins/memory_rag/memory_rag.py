@@ -15,7 +15,11 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from log_config import get_logger
+try:
+    from log_config import get_logger
+except ImportError:
+    import logging
+    get_logger = logging.getLogger
 from plugins.vector_store_adapter import ChromaAdapter, VectorStore
 
 logger = get_logger("memory_rag")

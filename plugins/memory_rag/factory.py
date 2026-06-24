@@ -7,10 +7,17 @@ from __future__ import annotations
 
 from typing import Optional
 
+try:
+    from log_config import get_logger
+except ImportError:
+    import logging
+    get_logger = logging.getLogger
+
+logger = get_logger("memory_rag.factory")
+
 from plugins.vector_store_adapter import ChromaAdapter, VectorStore
 from plugins.memory_rag.memory_rag import MemoryRAG
 from plugins.memory_rag.strategy import ScoreStrategy, NeutralStrategy
-
 
 class MemoryRAGFactory:
     """MemoryRAG 工厂。

@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from log_config import get_logger
+try:
+    from log_config import get_logger
+except ImportError:
+    import logging
+    get_logger = logging.getLogger
 from plugins.memory_rag.factory import MemoryRAGFactory
 from plugins.memory_rag.strategy import NeutralStrategy
 

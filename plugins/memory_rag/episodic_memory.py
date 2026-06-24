@@ -14,7 +14,11 @@ import sqlite3
 import time
 from typing import Any, Dict, List
 
-from log_config import get_logger
+try:
+    from log_config import get_logger
+except ImportError:
+    import logging
+    get_logger = logging.getLogger
 
 logger = get_logger("memory_rag.episodic")
 
