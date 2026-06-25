@@ -29,9 +29,15 @@ class Config:
     PROJECT_ROOT = str(Path(__file__).parent)
 
     # ==================== ASR（自动语音识别）配置 ====================
-    ASR_MODE = "cloud"  # "local" or "cloud" ; 本地 SenseVoice 或云端 MIMO
+    ASR_MODE = "faster-whisper"  # "local", "cloud", or "faster-whisper"
     ASR_MODEL_DIR = os.path.join(PROJECT_ROOT, "ASR_env/SenseVoice/models/SenseVoiceSmall")
     ASR_AUDIO_INPUT = os.path.join(PROJECT_ROOT, "ASR_env/input_voice/voice.wav")
+
+    # Faster-Whisper 配置（ASR_MODE = "faster-whisper" 时使用）
+    ASR_WHISPER_MODEL_SIZE = "small"  # tiny, base, small, medium, large-v3
+    ASR_WHISPER_DEVICE = "auto"       # cuda, cpu, auto（自动检测）
+    ASR_WHISPER_COMPUTE_TYPE = "float16"  # float16, int8_float16, int8
+    ASR_WHISPER_LANGUAGE = "zh"       # zh, en, auto（自动检测）
 
     # VAD（语音活动检测）参数 — 自动录音模式
     VAD_SILENCE_THRESHOLD = 500       # RMS 能量阈值，低于此值视为静音（0-32767 范围）
@@ -79,7 +85,7 @@ class Config:
     SHOW_WINDOW = True
 
     # ==================== LLM（大语言模型）配置 ====================
-    LLM_MODE = "cloud"              # "local" or "cloud"
+    LLM_MODE = "local"              # "local" or "cloud"
 
     # --- 云端 LLM（OpenAI 兼容协议，DeepSeek / MiMo / OpenAI / vLLM 等均可）---
     LLM_CLOUD_API_KEY = os.getenv("LLM_CLOUD_API_KEY", "")
@@ -87,7 +93,7 @@ class Config:
     LLM_CLOUD_MODEL_NAME = "deepseek-v4-flash"
 
     # --- 本地 LLM（LM Studio）---
-    LOCAL_LLM_MODEL_NAME = ""
+    LOCAL_LLM_MODEL_NAME = "qwen2.5-7b-instruct"  # LM Studio 中加载的模型标识
     LOCAL_LLM_API_URL = "http://127.0.0.1:1234/v1/chat/completions"
 
     # --- 通用路径 ---

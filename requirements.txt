@@ -21,6 +21,7 @@ openai            # OpenAI SDK（支持 OpenAI / DeepSeek / MiMo 兼容接口）
 pyaudiowpatch     # 麦克风录音（PyAudio WASAPI 分支，代码中 import pyaudiowpatch）
 keyboard          # 键盘事件监听（Ctrl 按住录音）
 funasr            # 阿里 SenseVoice 语音识别（本地推理）
+faster-whisper    # OpenAI Whisper 优化版（推荐，CPU/GPU 都支持）
 
 # ==================== TTS 模块（本地模式需要） ====================
 gradio            # CosyVoice WebUI 服务
