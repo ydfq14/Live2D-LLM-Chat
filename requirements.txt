@@ -41,12 +41,14 @@ onnxruntime       # ONNX 模型运行时（piper-tts 依赖，CPU/GPU 推理）
 # ==================== LangGraph / LangChain（Agentic RAG 需要） ====================
 langchain-core
 langchain-openai
-langgraph
 
 # ==================== 视频模块 ====================
-mediapipe 
-opencv-python
+mediapipe
+opencv-python>=4.5.0
 chromadb
 sentence-transformers
 fer>=22.5.1
-opencv-python>=4.5.0
+
+# ==================== 知识库模块 ====================
+jieba            # 中文分词（知识库检索）
+pymilvus         # Milvus 向量数据库客户端
