@@ -29,8 +29,7 @@ class Config:
     PROJECT_ROOT = str(Path(__file__).parent)
 
     # ==================== ASR（自动语音识别）配置 ====================
-    ASR_MODE = "faster-whisper"  # "local", "cloud", or "faster-whisper"
-    ASR_MODEL_DIR = os.path.join(PROJECT_ROOT, "ASR_env/SenseVoice/models/SenseVoiceSmall")
+    ASR_MODE = "faster-whisper"  # "faster-whisper" or "cloud"
     ASR_AUDIO_INPUT = os.path.join(PROJECT_ROOT, "ASR_env/input_voice/voice.wav")
 
     # Faster-Whisper 配置（ASR_MODE = "faster-whisper" 时使用）

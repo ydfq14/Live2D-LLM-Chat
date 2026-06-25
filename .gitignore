@@ -7,12 +7,9 @@ __pycache__/
 .models/
 models/
 
-# --- 本地 AI 模型（CosyVoice / SenseVoice）---
+# --- 本地 AI 模型（CosyVoice）---
 TTS_env/CosyVoice/*
 !TTS_env/CosyVoice/.gitkeep
-
-ASR_env/SenseVoice/*
-!ASR_env/SenseVoice/.gitkeep
 
 # --- Python 虚拟环境 / IDE ---
 .venv/

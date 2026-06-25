@@ -14,16 +14,12 @@ import pyaudiowpatch as pyaudio
 import numpy as np
 # 导入requests网络请求库，用于调用云端ASR接口发送HTTP请求
 import requests
-# 导入funasr语音识别框架AutoModel，SenseVoice本地语音识别模型
-from funasr import AutoModel
 # 导入faster-whisper语音识别框架（可选，按需导入）
 try:
     from faster_whisper import WhisperModel as FasterWhisperModel
     HAS_FASTER_WHISPER = True
 except ImportError:
     HAS_FASTER_WHISPER = False
-# 导入funasr文本后处理工具，用于识别结果文本标准化、数字转汉字等
-from funasr.utils.postprocess_utils import rich_transcription_postprocess
 # 导入全局配置文件，读取ASR模式、模型路径、云端密钥、接口地址等常量
 from config import Config
 # 导入日志工具，统一格式化日志输出
@@ -34,14 +30,14 @@ logger = get_logger(__name__)
 
 
 
-# ASR语音识别管理器：统一封装本地SenseVoice识别 + 云端MIMO语音识别，包含录音逻辑
+# ASR语音识别管理器：统一封装 faster-whisper 本地识别 + 云端MIMO语音识别，包含录音逻辑
 class ASRManager:
     # 类构造函数，初始化ASR运行模式、录音参数、本地模型/云端接口信息
     def __init__(self, mode=None, model_dir=None, device="cuda:0"):
         """
-        初始化 ASR 语音识别管理器，支持本地（SenseVoice）和云端（MIMO）两种模式。
+        初始化 ASR 语音识别管理器，支持 faster-whisper 本地和云端（MIMO）两种模式。
 
-        :param mode: "local" 或 "cloud"，不传则读取 Config.ASR_MODE
+        :param mode: "faster-whisper" 或 "cloud"，不传则读取 Config.ASR_MODE
         :param model_dir: 本地模型路径（仅本地模式使用）
         :param device: 本地模式使用的计算设备（默认 cuda:0）
         """
@@ -62,21 +58,8 @@ class ASRManager:
         # 采样位深：16位整型，wav标准音频格式
         self.format = pyaudio.paInt16
 
-        # ===================== 本地ASR模式初始化 =====================
-        if self.mode == "local":
-            # 优先使用传入的模型路径，无传参则读取配置文件中的模型目录
-            model_dir = model_dir or Config.ASR_MODEL_DIR
-            # 打印日志，记录本地识别初始化信息与使用的显卡设备
-            logger.info(f"ASR 初始化: local, device={device}")
-            # 实例化FunASR的SenseVoice语音识别模型
-            self.model = AutoModel(
-                model=model_dir,               # 本地模型文件夹路径
-                trust_remote_code=False,       # 禁止加载远程自定义代码，安全限制
-                device=device,                # 指定运行设备 cuda:0显卡
-                disable_update=True,          # 关闭模型自动更新，避免联网下载
-            )
         # ===================== Faster-Whisper 模式初始化 =====================
-        elif self.mode == "faster-whisper":
+        if self.mode == "faster-whisper":
             if not HAS_FASTER_WHISPER:
                 raise ImportError("未安装 faster-whisper，请运行: pip install faster-whisper")
 
@@ -245,10 +228,7 @@ class ASRManager:
         logger.info("▶ ASR 识别中 (%s)...", self.mode)
 
         # 判断模式，调用对应识别方法
-        if self.mode == "local":
-            # 本地SenseVoice识别，获取文本
-            text = self._recognize_local(wav_path)
-        elif self.mode == "faster-whisper":
+        if self.mode == "faster-whisper":
             # Faster-Whisper 本地识别，获取文本
             text = self._recognize_faster_whisper(wav_path)
         else:
@@ -263,22 +243,6 @@ class ASRManager:
         logger.info(f'▶ ASR 完成 ({self.mode})，耗时: {elapsed:.2f}s → "{text_preview}"')
         # 返回完整识别文本给上层调用（MainManager对话循环）
         return text
-
-    # ------------------------------------------------------------------
-    # 本地识别私有方法：SenseVoice离线语音识别
-    # ------------------------------------------------------------------
-    def _recognize_local(self, wav_path):
-        # 调用FunASR模型执行语音识别，传入音频路径与识别参数
-        res = self.model.generate(
-            input=wav_path,               # 输入wav音频文件路径
-            language="auto",              # 自动检测音频语言（中文/英文等）
-            use_itn=True,                 # 开启ITN文本标准化：数字转汉字、标点优化
-            batch_size_s=60,              # 单次处理音频最大时长60秒
-            merge_vad=True,               # 合并静音分段后的识别结果，拼接完整文本
-            merge_length_s=15,            # 最长合并片段15秒
-        )
-        # 取出原始识别文本，调用后处理工具清洗格式化，返回干净文本
-        return rich_transcription_postprocess(res[0]["text"])
 
     # ------------------------------------------------------------------
     # Faster-Whisper 识别私有方法：使用 Whisper 模型离线识别

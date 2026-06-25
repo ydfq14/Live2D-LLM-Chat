@@ -20,7 +20,6 @@ openai            # OpenAI SDK（支持 OpenAI / DeepSeek / MiMo 兼容接口）
 # ==================== ASR 模块（本地模式需要） ====================
 pyaudiowpatch     # 麦克风录音（PyAudio WASAPI 分支，代码中 import pyaudiowpatch）
 keyboard          # 键盘事件监听（Ctrl 按住录音）
-funasr            # 阿里 SenseVoice 语音识别（本地推理）
 faster-whisper    # OpenAI Whisper 优化版（推荐，CPU/GPU 都支持）
 
 # ==================== TTS 模块（本地模式需要） ====================
@@ -33,14 +32,11 @@ soundfile         # 音频文件读写
 
 # ==================== 说明 ====================
 # 【云端模式】仅需安装核心依赖 + openai + langgraph
-# 【本地模式】需要安装全部依赖（包括 funasr / torch / gradio 等）
+# 【本地模式】需要安装全部依赖（包括 faster-whisper / torch / gradio 等）
 #
 # CosyVoice 不在 PyPI 上，需单独安装：
 #   git clone https://github.com/FunAudioLLM/CosyVoice.git
 #   cd CosyVoice && pip install -e .
-#
-# SenseVoice 模型需单独下载：
-#   funasr download_model SenseVoiceSmall
 #
 # Live2D 模型需从 https://github.com/Arkueid/live2d-py 获取示例模型
 
