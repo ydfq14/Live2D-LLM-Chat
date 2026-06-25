@@ -1,16 +1,106 @@
 
 import os
 import time
+import types
 import base64
 import shutil
 import requests
 import pygame
 import wave
-from piper import PiperVoice
+from pathlib import Path
 from config import Config
 from log_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def download_piper_model(model_path: str) -> None:
+    """
+    自动下载 piper-tts 模型文件。
+
+    :param model_path: 模型文件路径（.onnx 文件）
+    """
+    model_path = Path(model_path)
+    config_path = model_path.with_suffix('.onnx.json')
+
+    # 如果模型文件和配置文件都已存在，直接返回
+    if model_path.exists() and config_path.exists():
+        logger.info(f"piper-tts 模型已存在: {model_path.name}")
+        return
+
+    logger.info("piper-tts 模型不存在，开始自动下载...")
+    model_dir = model_path.parent
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # HuggingFace 仓库信息
+    repo_id = "rhasspy/piper-voices"
+
+    # 需要下载的文件列表（相对于仓库的路径）
+    files_to_download = [
+        (f"zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx", model_path),
+        (f"zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json", config_path),
+    ]
+
+    try:
+        # 使用 requests 直接下载（更可靠，能正确使用镜像）
+        hf_endpoint = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+        logger.info(f"使用 HuggingFace 镜像: {hf_endpoint}")
+
+        # HuggingFace 仓库基础URL
+        base_url = f"https://huggingface.co/{repo_id}/resolve/main"
+
+        for repo_file, local_path in files_to_download:
+            if local_path.exists():
+                logger.info(f"文件已存在，跳过: {local_path.name}")
+                continue
+
+            # 构建完整的下载URL
+            original_url = f"{base_url}/{repo_file}"
+
+            # 如果配置了镜像，替换URL中的域名
+            if hf_endpoint and "hf-mirror.com" in hf_endpoint:
+                download_url = original_url.replace("huggingface.co", "hf-mirror.com")
+            else:
+                download_url = original_url
+
+            logger.info(f"正在下载: {repo_file}")
+            logger.info(f"  来源: {download_url}")
+
+            # 下载文件（带进度显示）
+            response = requests.get(download_url, stream=True, timeout=300)
+            response.raise_for_status()
+
+            # 获取文件总大小
+            total_size = int(response.headers.get('content-length', 0))
+            if total_size > 0:
+                logger.info(f"  文件大小: {total_size / 1024 / 1024:.1f} MB")
+
+            downloaded_size = 0
+            last_progress = 0  # 上次显示进度的百分比
+
+            # 写入文件（带进度更新）
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+
+                        # 显示下载进度（每5%显示一次）
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            if progress - last_progress >= 5:
+                                downloaded_mb = downloaded_size / 1024 / 1024
+                                total_mb = total_size / 1024 / 1024
+                                logger.info(f"  进度: {progress:.1f}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
+                                last_progress = progress
+
+            logger.info(f"  下载完成: {local_path.name} ({local_path.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    except Exception as e:
+        logger.error(f"下载失败: {e}")
+        logger.error(f"提示: 如果自动下载失败，请手动下载文件到 {model_dir}")
+        logger.error(f"下载地址: https://huggingface.co/{repo_id}/tree/main/zh_CN/huayan/medium")
+        raise FileNotFoundError(f"无法下载 piper-tts 模型: {e}")
 
 
 class TTSManager:
@@ -32,11 +122,28 @@ class TTSManager:
         if self.mode == "local":
             model_path = Config.PIPER_MODEL_PATH
             logger.info(f"TTS 初始化: local (piper-tts), model={model_path}")
+
+            # 自动下载模型文件（如果不存在）
             try:
+                download_piper_model(model_path)
+            except Exception as e:
+                logger.error(f"自动下载模型失败: {e}")
+                raise
+
+            try:
+                # 延迟导入 piper（仅在本地模式时加载）
+                from piper import PiperVoice
                 self.voice = PiperVoice.load(model_path)
+            except ImportError as e:
+                logger.error(f"未安装 piper-tts，请运行: pip install piper-tts")
+                raise ImportError(f"未安装 piper-tts，请运行: pip install piper-tts") from e
             except FileNotFoundError:
                 logger.error(f"模型文件不存在: {model_path}")
-                raise
+                logger.error("请下载 piper-tts 模型文件:")
+                logger.error("  1. 访问 https://huggingface.co/rhasspy/piper-voices/tree/main/zh_CN/huayan/medium")
+                logger.error("  2. 下载 zh_CN-huayan-medium.onnx 和 zh_CN-huayan-medium.onnx.json")
+                logger.error("  3. 放到 TTS_env/piper/ 目录下")
+                raise FileNotFoundError(f"piper-tts 模型文件不存在: {model_path}，请查看日志了解下载方法")
             except Exception as e:
                 logger.error(f"加载 piper 模型失败: {e}")
                 raise
@@ -105,17 +212,59 @@ class TTSManager:
         output_path = os.path.join(self.output_dir, output_filename)
 
         try:
-            with wave.open(output_path, "wb") as wav_file:
-                self.voice.synthesize(
-                    text,
-                    wav_file,
-                    speaker_id=self.speaker_id,
-                    length_scale=self.length_scale,
-                    noise_scale=self.noise_scale,
-                    noise_w=self.noise_w,
-                )
+            # 使用synthesize返回的SynthesisResult获取音频数据
+            logger.info(f"调用 piper.synthesize: text='{text[:30]}...'")
+
+            # synthesize返回一个SynthesisResult对象或generator
+            result = self.voice.synthesize(text)
+
+            # 检查返回类型
+            logger.info(f"synthesize 返回类型: {type(result)}")
+
+            if isinstance(result, types.GeneratorType):
+                # generator 类型：逐块收集 PCM 数据
+                logger.info("检测到 generator，逐块收集音频数据")
+                audio_chunks = []
+                sample_rate = Config.PIPER_SAMPLE_RATE
+                for chunk in result:
+                    audio_chunks.append(chunk.audio_int16_bytes)
+                    sample_rate = chunk.sample_rate
+                audio_data = b''.join(audio_chunks)
+                logger.info(f"generator 收集完成，总大小: {len(audio_data)} bytes")
+                with wave.open(output_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_data)
+                logger.info(f"generator 收集完成，总大小: {len(audio_data)} bytes")
+                with wave.open(output_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_data)
+            elif hasattr(result, 'audio_bytes'):
+                # SynthesisResult：直接写入 audio_bytes
+                logger.info(f"使用 audio_bytes 写入文件 (大小: {len(result.audio_bytes)} bytes)")
+                with open(output_path, 'wb') as f:
+                    f.write(result.audio_bytes)
+            elif isinstance(result, bytes):
+                # bytes 类型：直接写 PCM
+                logger.info(f"使用 raw bytes 写入文件 (大小: {len(result)} bytes)")
+                with wave.open(output_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(Config.PIPER_SAMPLE_RATE)
+                    wav_file.writeframes(result)
+            else:
+                logger.error(f"无法处理的返回类型: {type(result)}")
+                return None
+
+            logger.info(f"piper 合成完成，文件: {output_path}")
+
         except Exception as e:
             logger.error(f"piper 合成失败: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
         elapsed = time.time() - start_time

@@ -3,6 +3,9 @@
 # 安装方式: pip install -r requirements.txt
 # ============================================================
 
+# ==================== PyTorch CUDA 12.8 索引 ====================
+--index-url https://download.pytorch.org/whl/cu128
+
 # ==================== 核心依赖（本地+云端模式都需要） ====================
 requests          # HTTP 请求（云端 API 调用）
 numpy             # 数值计算（VAD 音频能量检测）
@@ -13,6 +16,11 @@ PyOpenGL          # OpenGL 绑定（代码中 import OpenGL.GL）
 pyautogui         # 鼠标位置监听（眼神跟随）
 live2d-py         # Live2D 模型加载与渲染
 langgraph         # LangGraph 智能体引擎（StateGraph 图流转）
+
+# ==================== PyTorch（CUDA 12.8 版本）====================
+torch             # PyTorch（CUDA 12.8）
+torchvision       # PyTorch 视觉模块
+torchaudio        # PyTorch 音频模块
 
 # ==================== LLM 模块 ====================
 openai            # OpenAI SDK（支持 OpenAI / DeepSeek / MiMo 兼容接口）
@@ -25,15 +33,16 @@ faster-whisper    # OpenAI Whisper 优化版（推荐，CPU/GPU 都支持）
 # ==================== TTS 模块（本地模式需要） ====================
 piper-tts         # Piper TTS（本地离线语音合成，ONNX 推理）
 onnxruntime       # ONNX 模型运行时（piper-tts 依赖，CPU/GPU 推理）
+huggingface_hub   # HuggingFace 模型下载（piper-tts 自动下载模型）
 
 # ==================== 说明 ====================
 # 【云端模式】仅需安装核心依赖 + openai + langgraph
 # 【本地模式】需要安装全部依赖（包括 faster-whisper / piper-tts 等）
 #
-# Piper 模型不在 PyPI 上，需手动下载：
-# 中文模型: https://huggingface.co/rhasspy/piper-voices/tree/main/zh_CN/huayan/medium
-#   下载 zh_CN-huayan-medium.onnx 和 zh_CN-huayan-medium.onnx.json
-#   放入 TTS_env/piper/ 目录
+# ✅ PyTorch 默认安装 CUDA 12.8 版本
+#    如需 CPU 版本，可移除顶部的 --extra-index-url 行
+#
+# Piper 模型会在首次使用时自动下载到 TTS_env/piper/ 目录
 #
 # Live2D 模型需从 https://github.com/Arkueid/live2d-py 获取示例模型
 
@@ -52,3 +61,8 @@ fer>=22.5.1
 # ==================== 知识库模块 ====================
 jieba            # 中文分词（知识库检索）
 pymilvus         # Milvus 向量数据库客户端
+milvus-lite      # Milvus 本地数据库支持（无需独立 Milvus 服务）
+
+
+rank-bm25
+pywebview

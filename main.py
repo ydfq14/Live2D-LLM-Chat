@@ -22,6 +22,9 @@ from async_wrapper import run_sync
 # 获取当前模块(main.py)专属日志实例，日志会自动标注当前文件名称，区分多模块日志
 logger = get_logger(__name__)
 
+# 验证 HuggingFace 镜像配置是否生效
+infrastructure._bootstrap.verify_hf_endpoint()
+
 
 # ==================================================================
 #  部署模式选择交互函数

@@ -71,11 +71,19 @@ class ASRManager:
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+            # 根据设备自动选择 compute_type（CPU 不支持 float16）
+            compute_type = Config.ASR_WHISPER_COMPUTE_TYPE
+            if device == "cpu" and compute_type == "float16":
+                compute_type = "float32"
+                logger.info(f"  CPU 模式不支持 float16，自动切换到 {compute_type}")
+
+            logger.info(f"  最终配置: device={device}, compute_type={compute_type}")
+
             # 初始化 WhisperModel
             self.model = FasterWhisperModel(
                 model_size_or_path=Config.ASR_WHISPER_MODEL_SIZE,
                 device=device,
-                compute_type=Config.ASR_WHISPER_COMPUTE_TYPE,
+                compute_type=compute_type,
             )
             self.whisper_language = Config.ASR_WHISPER_LANGUAGE
         # ===================== 云端ASR模式初始化 =====================

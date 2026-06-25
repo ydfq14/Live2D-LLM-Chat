@@ -183,7 +183,7 @@ class UIShell:
             title="VirtuMate — 助手面板",
             html=html,
             js_api=JSAPI(self),
-            width=400,
+            width=650,
             height=600,
             resizable=True,
             on_top=True,
