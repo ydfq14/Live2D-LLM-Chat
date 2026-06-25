@@ -5,7 +5,6 @@ import threading
 import datetime
 import sys
 from log_config import get_logger
-from TTS_api import TTSAPIManager
 from ASR import ASRManager
 from TTS import TTSManager
 from LLM import LLMManager
@@ -22,6 +21,101 @@ from async_wrapper import run_sync
 
 # 获取当前模块(main.py)专属日志实例，日志会自动标注当前文件名称，区分多模块日志
 logger = get_logger(__name__)
+
+
+# ==================================================================
+#  部署模式选择交互函数
+# ==================================================================
+def _select_deployment_mode():
+    """交互式选择 ASR、LLM、TTS 的部署模式（本地/云端）"""
+
+    # 检查命令行参数，如果指定 --auto 则跳过选择
+    if "--auto" in sys.argv:
+        print("\n使用 --auto 参数，跳过模式选择，使用默认配置")
+        print(f"  ASR: {Config.ASR_MODE}")
+        print(f"  LLM: {Config.LLM_MODE}")
+        print(f"  TTS: {Config.TTS_MODE}")
+        return True
+
+    print("\n" + "="*60)
+    print("VirtuMate 部署模式选择")
+    print("="*60)
+    print("\n请选择各模块的部署方式：")
+    print("  1. 本地 (Local) - 使用本地模型，离线可用")
+    print("  2. 云端 (Cloud) - 使用云端 API，需要网络\n")
+    print("提示：直接按回车使用当前配置\n")
+
+    # ASR 选择
+    print("-"*60)
+    print("【ASR 语音识别】")
+    print(f"  当前配置: {Config.ASR_MODE}")
+    print("  选项:")
+    print("    1. faster-whisper (本地)")
+    print("    2. cloud (云端 MIMO)")
+    print("    3. 使用当前配置 (回车)")
+
+    asr_choice = input("\n请选择 ASR 模式 [1/2/3]: ").strip()
+
+    if asr_choice == "1":
+        Config.ASR_MODE = "faster-whisper"
+        print("  ✓ ASR 已设置为: faster-whisper (本地)")
+    elif asr_choice == "2":
+        Config.ASR_MODE = "cloud"
+        print("  ✓ ASR 已设置为: cloud (云端)")
+    else:
+        print(f"  ✓ ASR 保持当前配置: {Config.ASR_MODE}")
+
+    # LLM 选择
+    print("\n" + "-"*60)
+    print("【LLM 大语言模型】")
+    print(f"  当前配置: {Config.LLM_MODE}")
+    print("  选项:")
+    print("    1. local (本地 LM Studio/Ollama)")
+    print("    2. cloud (云端 DeepSeek/MiMo)")
+    print("    3. 使用当前配置 (回车)")
+
+    llm_choice = input("\n请选择 LLM 模式 [1/2/3]: ").strip()
+
+    if llm_choice == "1":
+        Config.LLM_MODE = "local"
+        print("  ✓ LLM 已设置为: local (本地)")
+    elif llm_choice == "2":
+        Config.LLM_MODE = "cloud"
+        print("  ✓ LLM 已设置为: cloud (云端)")
+    else:
+        print(f"  ✓ LLM 保持当前配置: {Config.LLM_MODE}")
+
+    # TTS 选择
+    print("\n" + "-"*60)
+    print("【TTS 语音合成】")
+    print(f"  当前配置: {Config.TTS_MODE}")
+    print("  选项:")
+    print("    1. local (本地 piper-tts)")
+    print("    2. cloud (云端 MIMO)")
+    print("    3. 使用当前配置 (回车)")
+
+    tts_choice = input("\n请选择 TTS 模式 [1/2/3]: ").strip()
+
+    if tts_choice == "1":
+        Config.TTS_MODE = "local"
+        print("  ✓ TTS 已设置为: local (本地)")
+    elif tts_choice == "2":
+        Config.TTS_MODE = "cloud"
+        print("  ✓ TTS 已设置为: cloud (云端)")
+    else:
+        print(f"  ✓ TTS 保持当前配置: {Config.TTS_MODE}")
+
+    # 显示最终配置
+    print("\n" + "="*60)
+    print("最终部署配置:")
+    print("="*60)
+    print(f"  ASR: {Config.ASR_MODE}")
+    print(f"  LLM: {Config.LLM_MODE}")
+    print(f"  TTS: {Config.TTS_MODE}")
+    print("="*60 + "\n")
+
+    return True
+
 
 # 聊天框文本输入队列（全局列表）
 # 由ui_shell内嵌JS前端写入文本消息，main.run()主循环循环读取消费
@@ -75,6 +169,9 @@ class MainManager:
         # 第一步打印启动LOGO横幅
         _print_startup_banner()
 
+        # 交互式选择部署模式（ASR/LLM/TTS 本地或云端）
+        _select_deployment_mode()
+
         # 保存全局事件引用，供插件访问
         self._listening_enabled = _listening_enabled
         self._text_input_queue = _text_input_queue
@@ -94,25 +191,9 @@ class MainManager:
         logger.info("  日志输出: logs/run.log + 控制台")
 
         # ================================================================
-        #  阶段 1: TTS API（仅本地模式启动）
-        # 本地CosyVoice语音合成需要单独后台API服务提供推理接口
+        #  阶段 1: TTS 初始化（简化，无子进程）
         # ================================================================
-        logger.info("[阶段 1/5] TTS API 初始化")
-        # 判断配置文件TTS模式是否为本地离线
-        if Config.TTS_MODE == "local":
-            logger.info("  TTS 模式: 本地 (CosyVoice)")
-            # 实例化本地TTS后台API管理器，传入窗口显示开关
-            self.tts_api_manager = TTSAPIManager(Config.SHOW_WINDOW)
-            # 启动TTS推理API服务，返回布尔值标记是否启动成功
-            api_ready = self.tts_api_manager.start_tts_api()
-            # API启动失败，严重错误，直接终止初始化
-            if not api_ready:
-                logger.error("  [FAIL] TTS API 启动失败，程序终止！")
-                return
-            logger.info("  [OK] TTS API 启动成功")
-        else:
-            # 云端TTS模式，无需启动本地推理服务，跳过该流程
-            logger.info("  TTS 模式: 云端，跳过本地 CosyVoice 启动。")
+        logger.info("[阶段 1/5] TTS 本地模式使用 piper-tts，无需启动子进程")
 
         # ================================================================
         #  阶段 2: 四大核心AI模块初始化 ASR / TTS / LLM / Live2D

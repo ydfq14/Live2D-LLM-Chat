@@ -23,20 +23,17 @@ keyboard          # 键盘事件监听（Ctrl 按住录音）
 faster-whisper    # OpenAI Whisper 优化版（推荐，CPU/GPU 都支持）
 
 # ==================== TTS 模块（本地模式需要） ====================
-gradio            # CosyVoice WebUI 服务
-gradio_client     # 连接本地 CosyVoice API
-torch             # PyTorch（CosyVoice 依赖）
-torchaudio        # 音频处理（CosyVoice 依赖）
-librosa           # 音频加载与处理
-soundfile         # 音频文件读写
+piper-tts         # Piper TTS（本地离线语音合成，ONNX 推理）
+onnxruntime       # ONNX 模型运行时（piper-tts 依赖，CPU/GPU 推理）
 
 # ==================== 说明 ====================
 # 【云端模式】仅需安装核心依赖 + openai + langgraph
-# 【本地模式】需要安装全部依赖（包括 faster-whisper / torch / gradio 等）
+# 【本地模式】需要安装全部依赖（包括 faster-whisper / piper-tts 等）
 #
-# CosyVoice 不在 PyPI 上，需单独安装：
-#   git clone https://github.com/FunAudioLLM/CosyVoice.git
-#   cd CosyVoice && pip install -e .
+# Piper 模型不在 PyPI 上，需手动下载：
+# 中文模型: https://huggingface.co/rhasspy/piper-voices/tree/main/zh_CN/huayan/medium
+#   下载 zh_CN-huayan-medium.onnx 和 zh_CN-huayan-medium.onnx.json
+#   放入 TTS_env/piper/ 目录
 #
 # Live2D 模型需从 https://github.com/Arkueid/live2d-py 获取示例模型
 
@@ -51,3 +48,5 @@ mediapipe
 opencv-python
 chromadb
 sentence-transformers
+fer>=22.5.1
+opencv-python>=4.5.0

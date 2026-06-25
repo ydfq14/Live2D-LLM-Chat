@@ -7,10 +7,6 @@ __pycache__/
 .models/
 models/
 
-# --- 本地 AI 模型（CosyVoice）---
-TTS_env/CosyVoice/*
-!TTS_env/CosyVoice/.gitkeep
-
 # --- Python 虚拟环境 / IDE ---
 .venv/
 .idea/
@@ -38,6 +34,11 @@ TTS_env/voice_history/*.wav
 # --- TTS 临时文件 ---
 TTS_env/tmp/*
 !TTS_env/tmp/.gitkeep
+
+# --- Piper TTS 模型 ---
+TTS_env/piper/*.onnx
+TTS_env/piper/*.onnx.json
+!TTS_env/piper/.gitkeep
 
 # --- ASR 输入音频 ---
 ASR_env/input_voice/*.wav

@@ -45,12 +45,19 @@ class Config:
     VAD_SPEECH_PADDING = 0.2          # 语音开始前保留的音频秒数，避免截断开头
 
     # ==================== TTS（文本转语音）配置 ====================
-    TTS_MODE = "cloud"  # "local" or "cloud" ; 本地 CosyVoice 或云端 MIMO
-    TTS_API_URL = "http://localhost:8000/" # 该地址为cosyvoice模型自动分配地址，无出错时不改动
+    TTS_MODE = "cloud"  # "local" or "cloud" ; 本地 piper-tts 或云端 MIMO
     TTS_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "TTS_env/output_voice/")
     TTS_HISTORY_DIR = os.path.join(PROJECT_ROOT, "TTS_env/voice_history/")
-    TTS_PROMPT_TEXT = os.path.join(PROJECT_ROOT, "TTS_env/voice_training_sample/text_taiyuan.txt")
-    TTS_PROMPT_WAV = os.path.join(PROJECT_ROOT, "TTS_env/voice_training_sample/taiyuan.mp3")
+    TTS_CLEANUP_MODE = "move"  # "delete" or "move"; 配置文件清理方式（delete: 删除 | move: 归档）
+
+    # Piper TTS 本地配置 (TTS_MODE = "local" 时使用)
+    # 中文模型: https://huggingface.co/rhasspy/piper-voices/tree/main/zh_CN/huayan/medium
+    PIPER_MODEL_PATH = os.path.join(PROJECT_ROOT, "TTS_env/piper/zh_CN-huayan-medium.onnx")
+    PIPER_SPEAKER_ID = 0            # 多说话人模型的 ID（单说话人为 0）
+    PIPER_LENGTH_SCALE = 1.0        # 语速：<1.0 加快，>1.0 减慢
+    PIPER_NOISE_SCALE = 0.667       # 表现力噪声（0.0-1.0）
+    PIPER_NOISE_W = 0.8             # 时长噪声（0.0-1.0）
+    PIPER_SAMPLE_RATE = 22050       # 采样率（模型默认）
 
     # ==================== 云端 MIMO API 配置 ====================
     # 前往 https://platform.xiaomimimo.com 注册获取 API Key
@@ -74,15 +81,6 @@ class Config:
     MIMO_TTS_FORMAT = "wav"                 # wav | pcm16
     MIMO_TTS_STYLE = "语速适中、自然亲切"    # 自然语言风格描述（可选）
 
-    # ==================== TTS API 相关（仅本地模式使用） ====================
-    # Miniconda 安装路径（本地 TTS 模式需要，云端模式无需设置）
-    # 如果 TTS_MODE = "local"，请修改为你的实际 Miniconda 安装路径
-    MINICONDA_PATH = "D:/ProgramFiles/miniconda"  # 例如："C:/Users/你的用户名/miniconda3" 或 "D:/ProgramFiles/miniconda3"
-    WEBUI_PYTHON = os.path.join(MINICONDA_PATH, "python.exe") if MINICONDA_PATH else ""
-    WEBUI_SCRIPT = os.path.join(PROJECT_ROOT, "TTS_env/CosyVoice/webui.py")
-    CLEANUP_MODE = "move"  # "delete" or "move"; 配置文件清理方式（delete: 删除 | move: 归档）
-    SHOW_WINDOW = True
-
     # ==================== LLM（大语言模型）配置 ====================
     LLM_MODE = "local"              # "local" or "cloud"
 
@@ -102,11 +100,6 @@ class Config:
 
     # Live2D 配置
     LIVE2D_MODEL_PATH = os.path.join(PROJECT_ROOT, "Live2d_env/pachirisu anime girl - top half.model3.json")
-
-    # WebUI 相关配置
-    WEBUI_SAVE_DIR = os.path.join(PROJECT_ROOT, "TTS_env/output_voice/")
-    WEBUI_HISTORY_DIR = os.path.join(PROJECT_ROOT, "TTS_env/voice_history/")
-    WEBUI_MODEL_DIR = os.path.join(PROJECT_ROOT, "TTS_env/CosyVoice/pretrained_models/CosyVoice2-0.5B")
 
     # ==================== IOCP 配置 ====================
     # IOCP工作线程数（0=自动，通常为 CPU核心数 * 2）

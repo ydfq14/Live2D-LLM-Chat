@@ -5,7 +5,8 @@ import base64
 import shutil
 import requests
 import pygame
-from gradio_client import Client, handle_file
+import wave
+from piper import PiperVoice
 from config import Config
 from log_config import get_logger
 
@@ -29,11 +30,21 @@ class TTSManager:
         os.makedirs(self.output_dir, exist_ok=True)
 
         if self.mode == "local":
-            logger.info(f"TTS 初始化: local, api={api_url or Config.TTS_API_URL}")
-            self.client = Client(api_url or Config.TTS_API_URL)
+            model_path = Config.PIPER_MODEL_PATH
+            logger.info(f"TTS 初始化: local (piper-tts), model={model_path}")
+            try:
+                self.voice = PiperVoice.load(model_path)
+            except FileNotFoundError:
+                logger.error(f"模型文件不存在: {model_path}")
+                raise
+            except Exception as e:
+                logger.error(f"加载 piper 模型失败: {e}")
+                raise
+            self.speaker_id = Config.PIPER_SPEAKER_ID
+            self.length_scale = Config.PIPER_LENGTH_SCALE
+            self.noise_scale = Config.PIPER_NOISE_SCALE
+            self.noise_w = Config.PIPER_NOISE_W
             self.history_dir = Config.TTS_HISTORY_DIR
-            self.prompt_text_path = Config.TTS_PROMPT_TEXT
-            self.prompt_wav_path = Config.TTS_PROMPT_WAV
             os.makedirs(self.history_dir, exist_ok=True)
         else:
             logger.info(f"TTS 初始化: cloud, model={Config.MIMO_TTS_MODEL}, voice={Config.MIMO_TTS_VOICE}")
@@ -85,30 +96,36 @@ class TTSManager:
                 logger.warning(f"无法移动 {file} 到历史目录: {e}")
 
     def _synthesize_local(self, text):
-        """
-        调用本地 CosyVoice 进行语音合成（3s 极速复刻模式）。
-        """
+        """使用 piper-tts 进行本地语音合成。"""
         self.clear_output_directory()
 
-        with open(self.prompt_text_path, "r", encoding="utf-8") as f:
-            prompt_text = f.read()
-
         start_time = time.time()
-        self.client.predict(
-            tts_text=text,
-            mode_checkbox_group="3s极速复刻",
-            sft_dropdown="",
-            prompt_text=prompt_text,
-            prompt_wav_upload=handle_file(self.prompt_wav_path),
-            prompt_wav_record=handle_file(self.prompt_wav_path),
-            instruct_text="",
-            seed=0,
-            stream=False,
-            speed=1,
-            api_name="/generate_audio",
-        )
-        logger.info(f"▶ TTS 完成 (local)，耗时: {time.time() - start_time:.2f}s")
-        return self._get_latest_audio()
+        timestamp = int(time.time() * 1000)
+        output_filename = f"tts_output_{timestamp}.wav"
+        output_path = os.path.join(self.output_dir, output_filename)
+
+        try:
+            with wave.open(output_path, "wb") as wav_file:
+                self.voice.synthesize(
+                    text,
+                    wav_file,
+                    speaker_id=self.speaker_id,
+                    length_scale=self.length_scale,
+                    noise_scale=self.noise_scale,
+                    noise_w=self.noise_w,
+                )
+        except Exception as e:
+            logger.error(f"piper 合成失败: {e}")
+            return None
+
+        elapsed = time.time() - start_time
+        logger.info(f"▶ TTS 完成 (local/piper)，耗时: {elapsed:.2f}s，文件: {output_path}")
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            logger.error(f"合成失败：输出文件为空或不存在 {output_path}")
+            return None
+
+        return output_path
 
     # ------------------------------------------------------------------
     # 云端合成：MiMo-V2.5-TTS
@@ -178,19 +195,6 @@ class TTSManager:
     # ------------------------------------------------------------------
     # 工具方法
     # ------------------------------------------------------------------
-
-    def _get_latest_audio(self):
-        """获取 output_voice 目录下最新生成的音频文件（仅本地模式使用）"""
-        audio_files = [f for f in os.listdir(self.output_dir) if f.endswith(".wav")]
-        if not audio_files:
-            logger.warning("output_voice 目录下未找到音频文件。")
-            return None
-
-        audio_files.sort(
-            key=lambda x: os.path.getmtime(os.path.join(self.output_dir, x)),
-            reverse=True,
-        )
-        return os.path.join(self.output_dir, audio_files[0])
 
 
 # ------------------------------------------------------------------
