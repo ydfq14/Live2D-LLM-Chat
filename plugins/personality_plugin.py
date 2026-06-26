@@ -48,6 +48,8 @@ class PersonalityPlugin(PluginBase):
         self._profiles: dict = {}
         # 当前激活的性格名称
         self.current: str = ""
+        #用于TTS文本梳理
+        self._last_clean: str = ""
 
     # ═══════════════ 启动初始化 ═══════════════
 
@@ -204,14 +206,25 @@ class PersonalityPlugin(PluginBase):
             return ""
         return f"【当前角色设定】\n{profile['system_prompt']}"
 
+
+
     def on_before_tts(self, text: str) -> str | None:
         """
-        TTS 合成前调用（预留接口）。
-
-        未来可根据性格做语气词替换、文本风格调整等。
-        返回 None 表示不做修改，返回字符串会替换原文本。
+        TTS 合成前调用，清理文本中不适合朗读的内容：
+        - 删除中文括号内的动作描述：（尾巴摇了摇）
+        - 删除英文括号内的动作描述：(ears twitching)
+        - 保留其他文本不变，只影响 TTS 朗读，不影响聊天框显示
         """
-        return None
+        import re
+        # 删除中文括号及其内容：（动作描述）
+        text = re.sub(r'（[^）]*?）', '', text)
+        # 删除英文括号及其内容：(action description)
+        text = re.sub(r'\([^)]*?\)', '', text)
+        # 清理多余空格
+        text = re.sub(r'\s+', ' ', text).strip()
+        # 如果清理后为空或没有变化，返回 None 表示不做修改
+        return text if text != self._last_clean else None
+
 
     # ═══════════════ 前端 HTML 面板 ═══════════════
 
