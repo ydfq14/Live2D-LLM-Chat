@@ -1,131 +1,112 @@
-# VirtuMate Live2D-LLM-Chat
+# VirtuMate - Live2D AI 桌面助手
 
-[![IOCP](https://img.shields.io/badge/IOCP-Architecture-blue.svg)](docs/IOCP_ARCHITECTURE.md)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple.svg)](https://langchain-ai.github.io/langgraph/)
-[![Python](https://img.shields.io/badge/Python-3.10+-yellow.svg)](https://www.python.org/downloads/)
+基于 Live2D 数字人 + LLM 对话 + 语音交互的桌面 AI 助手，支持本地/云端混合部署。
 
-> **智能语音对话 Live2D 桌宠** | IOCP异步架构 | 插件化系统 | LangGraph智能体
+## 功能特性
 
----
+- **Live2D 数字人**：OpenGL 实时渲染，嘴型同步，眼神跟随
+- **语音交互**：麦克风录音 → ASR 语音识别 → LLM 对话 → TTS 语音合成
+- **多 TTS 引擎**：本地 Piper TTS / 云端 MiMo TTS / 本地 MOSS-TTS-Nano（支持声音克隆）
+- **多 ASR 引擎**：本地 faster-whisper / 云端 MiMo ASR
+- **LLM 对话**：云端 DeepSeek/MiMo API 或本地 LM Studio
+- **插件系统**：情绪识别、定时提醒、知识库 RAG 检索、Agent 智能体
 
 ## 快速开始
 
+### 环境要求
+
+- Python >= 3.10
+- Windows 10/11（Live2D 渲染依赖 OpenGL）
+- 可选：NVIDIA GPU（CUDA 12.x，加速 ASR/LLM 推理）
+
+### 安装
+
 ```bash
-# 1. 安装依赖
+git clone <repo-url>
+cd Live2D-LLM-Chat
 pip install -r requirements.txt
+```
 
-# 2. 配置环境变量
+### 配置
+
+复制环境变量模板并填入 API Key：
+
+```bash
 cp .env.example .env
-# 编辑 .env 文件，填入API密钥
+# 编辑 .env，填入 MIMO_API_KEY、LLM_CLOUD_API_KEY 等
+```
 
-# 3. 运行程序
+### 启动
+
+```bash
+# 方式 1：一键启动（自动配置 HuggingFace 镜像）
+run.bat
+
+# 方式 2：直接运行
 python main.py
 ```
 
----
+启动后按提示选择 ASR / LLM / TTS 的部署模式（本地或云端）。
+
+## TTS 引擎
+
+| 模式 | 引擎 | 说明 |
+|------|------|------|
+| `local` | Piper TTS | 轻量本地 TTS，22kHz，单音色，CPU 友好 |
+| `cloud` | MiMo-V2.5-TTS | 小米云端 TTS，多种音色，需 API Key |
+| `moss` | MOSS-TTS-Nano | 本地 ONNX TTS，48kHz 立体声，支持声音克隆，20 种语言 |
+
+在 `config.py` 中设置 `TTS_MODE` 切换，或启动时交互选择。
+
+### MOSS-TTS-Nano 声音克隆
+
+1. 准备一段 3~10 秒的参考音频（WAV/MP3/FLAC）
+2. 放到 `TTS_env/prompt_audio/` 目录
+3. 在 `config.py` 中设置：
+   ```python
+   TTS_MODE = "moss"
+   MOSS_PROMPT_AUDIO_PATH = "TTS_env/prompt_audio/my_voice.wav"
+   ```
+4. 首次启动会自动下载 ONNX 模型到 MOSS-TTS-Nano 项目的 `models/` 目录
+
+内置音色：Xiaoyu / Yuewen / Lingyu（中文女声），Junhao / Zhiming / Weiguo（中文男声），Trump / Ava / Adam 等英文音色，以及多个日语音色。
 
 ## 项目结构
 
 ```
-Live2D-LLM-Chat/
-├── main.py                    # 主程序入口
-├── config.py                  # 配置文件
-├── event_loop.py              # IOCP事件循环调度器
-├── async_wrapper.py           # 同步代码异步包装器
-├── plugin_base.py             # 插件基类
-├── plugin_registry.py         # 插件注册中心
-├── graph_engine.py            # LangGraph智能体引擎
-├── LLM.py                    # LLM管理器
-├── TTS.py                    # TTS管理器
-├── ASR.py                    # ASR管理器
-├── Live2d_animation.py        # Live2D管理器
-├── ui_shell.py               # UI前端管理器
-├── kb_controller.py           # 知识库控制器
-├── log_config.py             # 日志配置
-├── requirements.txt           # 依赖列表
-├── .env.example              # 环境变量示例
-│
-├── docs/                     # 📚 文档目录
-│   ├── README.md             # 项目说明（英文）
-│   ├── README_CN.md          # 项目说明（中文）
-│   ├── PROJECT_DOCUMENTATION.md  # 完整项目文档
-│   ├── IOCP_ARCHITECTURE.md # IOCP架构文档
-│   └── ...                   # 其他文档
-│
-├── plugins/                  # 🔌 插件目录
-│   ├── chatbox_plugin.py     # 聊天框插件
-│   ├── emotion_rag_plugin.py # 情绪分析RAG插件
-│   ├── scheduler_plugin.py   # 日程管理插件
-│   ├── agentic_rag_plugin.py # Agentic RAG插件
-│   └── demo_template_plugin.py # 模板示例
-│
-├── test/                     # 🧪 测试目录
-│   ├── test_iocp_basic.py    # IOCP基础测试
-│   ├── test_plugin_iocp.py   # 插件系统测试
-│   ├── test_main_iocp.py     # main.py验证
-│   └── test_scheduler_plugin.py # 日程管理测试
-│
-├── infrastructure/           # 🏗️ 基础设施
-│   └── _bootstrap.py         # 启动引导
-│
-├── .models/                  # 📦 模型缓存目录
-├── plugins_data/             # 💾 插件数据目录
-├── logs/                     # 📝 日志目录
-├── ASR_env/                  # ASR环境
-├── TTS_env/                  # TTS环境
-├── LLM_env/                  # LLM环境
-└── Live2d_env/               # Live2D环境
+├── main.py                 # 主入口，交互式部署模式选择
+├── config.py               # 全局配置（ASR/LLM/TTS/Live2D 参数）
+├── graph_engine.py         # LangGraph 对话引擎（图节点编排）
+├── ASR.py                  # 语音识别管理器
+├── LLM.py                  # 大语言模型管理器
+├── TTS.py                  # 语音合成管理器（Piper/MiMo/MOSS 三模式）
+├── Live2d_animation.py     # Live2D 渲染与嘴型同步
+├── ui_shell.py             # pywebview 前端 UI
+├── kb_controller.py        # 知识库控制器（Milvus + BGE-M3 向量检索）
+├── infrastructure/
+│   └── _bootstrap.py       # 启动引导（模型缓存重定向 + HF 镜像回退）
+├── plugins/                # 插件目录
+│   ├── emotion_rag_plugin.py    # 情绪 RAG 插件
+│   ├── scheduler_plugin.py      # 定时提醒插件
+│   ├── agentic_rag_plugin.py    # Agent 智能体 RAG 插件
+│   └── chatbox_plugin.py        # 聊天框插件
+├── TTS_env/                # TTS 工作目录（输出音频、模型缓存）
+├── ASR_env/                # ASR 工作目录（录音文件）
+├── Live2d_env/             # Live2D 模型文件
+├── LLM_env/                # LLM 对话历史
+├── .models/                # 模型缓存（HuggingFace/ModelScope/PyTorch）
+└── logs/                   # 运行日志
 ```
 
----
+## HuggingFace 镜像
 
-## 核心模块
+国内用户自动使用 `hf-mirror.com` 镜像加速模型下载。镜像下载失败时自动回退到 `huggingface.co` 官方站。如需手动指定：
 
-| 模块 | 文件 | 功能 |
-|------|------|------|
-| 主程序 | `main.py` | MainManager类，统筹调度所有模块 |
-| 配置 | `config.py` | 统一配置管理 |
-| IOCP | `event_loop.py` | 高性能异步事件循环调度器 |
-| 异步包装器 | `async_wrapper.py` | 同步代码异步包装 |
-| 插件系统 | `plugin_base.py` + `plugin_registry.py` | 模块化插件架构 |
-| 智能体 | `graph_engine.py` | LangGraph图引擎 |
-
----
-
-## 插件系统
-
-| 插件 | 功能 |
-|------|------|
-| chatbox_plugin.py | 聊天框界面 |
-| emotion_rag_plugin.py | 情绪分析与RAG记忆 |
-| scheduler_plugin.py | 日程管理 |
-| agentic_rag_plugin.py | 知识库RAG |
-| demo_template_plugin.py | 插件开发模板 |
-
----
-
-## 技术栈
-
-- **IOCP异步架构**: Windows ProactorEventLoop
-- **LangGraph**: 智能体图引擎
-- **pywebview**: 桌面前端
-- **Chroma**: 向量数据库
-- **BGE-M3**: 嵌入模型
-- **MIMO**: 云端ASR/TTS/LLM
-
----
-
-## 文档
-
-详细文档请查看 [docs/](docs/) 目录：
-
-- [项目说明（中文）](docs/README_CN.md)
-- [完整项目文档](docs/PROJECT_DOCUMENTATION.md)
-- [IOCP架构文档](docs/IOCP_ARCHITECTURE.md)
-- [项目状态报告](docs/PROJECT_STATUS_REPORT.md)
-
----
+```bash
+set HF_ENDPOINT=https://huggingface.co   # 使用官方站（需网络通畅）
+set HF_ENDPOINT=https://hf-mirror.com    # 使用国内镜像
+```
 
 ## 许可证
 
-[Apache-2.0 License](LICENSE)
+本项目仅供个人学习使用。依赖的第三方模型（Piper TTS、MOSS-TTS-Nano、faster-whisper 等）请遵循其各自的许可协议。

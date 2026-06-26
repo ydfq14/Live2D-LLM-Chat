@@ -14,10 +14,12 @@ import pyaudiowpatch as pyaudio
 import numpy as np
 # 导入requests网络请求库，用于调用云端ASR接口发送HTTP请求
 import requests
-# 导入funasr语音识别框架AutoModel，SenseVoice本地语音识别模型
-from funasr import AutoModel
-# 导入funasr文本后处理工具，用于识别结果文本标准化、数字转汉字等
-from funasr.utils.postprocess_utils import rich_transcription_postprocess
+# 导入faster-whisper语音识别框架（可选，按需导入）
+try:
+    from faster_whisper import WhisperModel as FasterWhisperModel
+    HAS_FASTER_WHISPER = True
+except ImportError:
+    HAS_FASTER_WHISPER = False
 # 导入全局配置文件，读取ASR模式、模型路径、云端密钥、接口地址等常量
 from config import Config
 # 导入日志工具，统一格式化日志输出
@@ -28,23 +30,23 @@ logger = get_logger(__name__)
 
 
 
-# ASR语音识别管理器：统一封装本地SenseVoice识别 + 云端MIMO语音识别，包含录音逻辑
+# ASR语音识别管理器：统一封装 faster-whisper 本地识别 + 云端MIMO语音识别，包含录音逻辑
 class ASRManager:
     # 类构造函数，初始化ASR运行模式、录音参数、本地模型/云端接口信息
     def __init__(self, mode=None, model_dir=None, device="cuda:0"):
         """
-        初始化 ASR 语音识别管理器，支持本地（SenseVoice）和云端（MIMO）两种模式。
+        初始化 ASR 语音识别管理器，支持 faster-whisper 本地和云端（MIMO）两种模式。
 
-        :param mode: "local" 或 "cloud"，不传则读取 Config.ASR_MODE
+        :param mode: "faster-whisper" 或 "cloud"，不传则读取 Config.ASR_MODE
         :param model_dir: 本地模型路径（仅本地模式使用）
         :param device: 本地模式使用的计算设备（默认 cuda:0）
         """
         # 优先使用传入的mode，未传入则读取配置文件中的全局ASR模式
         self.mode = mode or Config.ASR_MODE
-        # 校验模式合法性，只能是本地local或云端cloud
-        if self.mode not in ("local", "cloud"):
+        # 校验模式合法性，支持本地local、云端cloud或faster-whisper
+        if self.mode not in ("local", "cloud", "faster-whisper"):
             # 非法模式抛出异常，终止程序并提示错误
-            raise ValueError(f"ASR_MODE 必须为 'local' 或 'cloud'，当前为: {self.mode}")
+            raise ValueError(f"ASR_MODE 必须为 'local', 'cloud' 或 'faster-whisper'，当前为: {self.mode}")
 
         # ===================== 录音通用参数（本地/云端录音共用一套配置） =====================
         # 音频采样率：44100Hz，通用人声录音标准采样率
@@ -56,19 +58,34 @@ class ASRManager:
         # 采样位深：16位整型，wav标准音频格式
         self.format = pyaudio.paInt16
 
-        # ===================== 本地ASR模式初始化 =====================
-        if self.mode == "local":
-            # 优先使用传入的模型路径，无传参则读取配置文件中的模型目录
-            model_dir = model_dir or Config.ASR_MODEL_DIR
-            # 打印日志，记录本地识别初始化信息与使用的显卡设备
-            logger.info(f"ASR 初始化: local, device={device}")
-            # 实例化FunASR的SenseVoice语音识别模型
-            self.model = AutoModel(
-                model=model_dir,               # 本地模型文件夹路径
-                trust_remote_code=False,       # 禁止加载远程自定义代码，安全限制
-                device=device,                # 指定运行设备 cuda:0显卡
-                disable_update=True,          # 关闭模型自动更新，避免联网下载
+        # ===================== Faster-Whisper 模式初始化 =====================
+        if self.mode == "faster-whisper":
+            if not HAS_FASTER_WHISPER:
+                raise ImportError("未安装 faster-whisper，请运行: pip install faster-whisper")
+
+            logger.info(f"ASR 初始化: faster-whisper, model={Config.ASR_WHISPER_MODEL_SIZE}, device={Config.ASR_WHISPER_DEVICE}")
+
+            # 自动选择设备
+            device = Config.ASR_WHISPER_DEVICE
+            if device == "auto":
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            # 根据设备自动选择 compute_type（CPU 不支持 float16）
+            compute_type = Config.ASR_WHISPER_COMPUTE_TYPE
+            if device == "cpu" and compute_type == "float16":
+                compute_type = "float32"
+                logger.info(f"  CPU 模式不支持 float16，自动切换到 {compute_type}")
+
+            logger.info(f"  最终配置: device={device}, compute_type={compute_type}")
+
+            # 初始化 WhisperModel
+            self.model = FasterWhisperModel(
+                model_size_or_path=Config.ASR_WHISPER_MODEL_SIZE,
+                device=device,
+                compute_type=compute_type,
             )
+            self.whisper_language = Config.ASR_WHISPER_LANGUAGE
         # ===================== 云端ASR模式初始化 =====================
         else:
             # 打印日志，记录云端识别初始化与使用的云端模型名称
@@ -219,9 +236,9 @@ class ASRManager:
         logger.info("▶ ASR 识别中 (%s)...", self.mode)
 
         # 判断模式，调用对应识别方法
-        if self.mode == "local":
-            # 本地SenseVoice识别，获取文本
-            text = self._recognize_local(wav_path)
+        if self.mode == "faster-whisper":
+            # Faster-Whisper 本地识别，获取文本
+            text = self._recognize_faster_whisper(wav_path)
         else:
             # 云端MIMO接口识别，获取文本
             text = self._recognize_cloud(wav_path)
@@ -236,20 +253,33 @@ class ASRManager:
         return text
 
     # ------------------------------------------------------------------
-    # 本地识别私有方法：SenseVoice离线语音识别
+    # Faster-Whisper 识别私有方法：使用 Whisper 模型离线识别
     # ------------------------------------------------------------------
-    def _recognize_local(self, wav_path):
-        # 调用FunASR模型执行语音识别，传入音频路径与识别参数
-        res = self.model.generate(
-            input=wav_path,               # 输入wav音频文件路径
-            language="auto",              # 自动检测音频语言（中文/英文等）
-            use_itn=True,                 # 开启ITN文本标准化：数字转汉字、标点优化
-            batch_size_s=60,              # 单次处理音频最大时长60秒
-            merge_vad=True,               # 合并静音分段后的识别结果，拼接完整文本
-            merge_length_s=15,            # 最长合并片段15秒
+    def _recognize_faster_whisper(self, wav_path):
+        """
+        使用 faster-whisper 进行语音识别。
+
+        :param wav_path: 待识别的 wav 音频文件路径
+        :return: 识别完成后的纯文本结果
+        """
+        # 执行转录，language 为 None 时自动检测
+        language = self.whisper_language if self.whisper_language != "auto" else None
+        segments, info = self.model.transcribe(
+            wav_path,
+            language=language,
+            beam_size=5,
+            vad_filter=True,  # 启用 VAD 过滤静音段
         )
-        # 取出原始识别文本，调用后处理工具清洗格式化，返回干净文本
-        return rich_transcription_postprocess(res[0]["text"])
+
+        # 拼接所有 segments 的文本
+        text = " ".join([segment.text for segment in segments])
+
+        # 清理文本：去除首尾空白
+        text = text.strip()
+
+        logger.debug(f"faster-whisper 识别结果: language={info.language}, probability={info.language_probability:.2f}")
+
+        return text
 
     # ------------------------------------------------------------------
     # 云端识别私有方法：调用MIMO大模型ASR HTTP接口

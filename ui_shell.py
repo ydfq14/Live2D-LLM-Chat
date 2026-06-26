@@ -183,7 +183,7 @@ class UIShell:
             title="VirtuMate — 助手面板",
             html=html,
             js_api=JSAPI(self),
-            width=400,
+            width=650,
             height=600,
             resizable=True,
             on_top=True,
@@ -206,6 +206,13 @@ class UIShell:
         ]
         if not ui_plugins:
             return "<html><body><h2>无可用面板</h2></body></html>"
+
+        # 排序：chatbox 插件放在最前面（左边第一个）
+        def _plugin_sort_key(p):
+            # chatbox 排第一（优先级0），其他按名称排序
+            return (0 if p.name == "chatbox" else 1, p.name)
+
+        ui_plugins.sort(key=_plugin_sort_key)
 
         # 构建 Tab 按钮
         tab_buttons: list[str] = []

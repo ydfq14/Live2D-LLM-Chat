@@ -38,6 +38,10 @@ WH_MOUSE_LL = 14
 WM_RBUTTONDOWN = 0x0204
 # 鼠标消息：右键松开
 WM_RBUTTONUP   = 0x0205
+# 鼠标消息：左键按下
+WM_LBUTTONDOWN = 0x0201
+# 鼠标消息：左键松开
+WM_LBUTTONUP   = 0x0202
 # 鼠标消息：鼠标移动
 WM_MOUSEMOVE   = 0x0200
 
@@ -225,15 +229,15 @@ class Live2DAnimationManager:
                                 self._pending_win_y = self._drag_start_win[1] + dy
                                 self._has_pending_move = True
 
-                        # 右键按下
-                        elif wParam == WM_RBUTTONDOWN:
+                        # 右键或左键按下
+                        elif wParam == WM_RBUTTONDOWN or wParam == WM_LBUTTONDOWN:
                             if self._is_over_window(sx, sy):
                                 self._pending_drag_mouse = (sx, sy)
                                 self._need_drag_init = True
                                 self._request_capture = True
 
-                        # 右键释放
-                        elif wParam == WM_RBUTTONUP:
+                        # 右键或左键释放
+                        elif wParam == WM_RBUTTONUP or wParam == WM_LBUTTONUP:
                             if self._dragging or getattr(self, '_request_capture', False):
                                 self._request_release = True
                 except Exception as e:
@@ -262,7 +266,8 @@ class Live2DAnimationManager:
 
         def _on_click(x, y, button, pressed):
             try:
-                if button == getattr(pynput_mouse.Button, 'right'):
+                # 支持左键和右键拖动
+                if button in (getattr(pynput_mouse.Button, 'right'), getattr(pynput_mouse.Button, 'left')):
                     sx, sy = int(x), int(y)
                     if pressed:
                         # 仅请求渲染线程关闭穿透并开始拖动（避免钩子线程直接修改窗口样式）
@@ -296,7 +301,7 @@ class Live2DAnimationManager:
         if getattr(self, "_pynput_available", False) and getattr(self, "_pynput_listener", None):
             try:
                 self._pynput_listener.start()
-                logger.info("💡 使用 pynput 全局鼠标监听（右键拖拽移动窗口）")
+                logger.info("💡 使用 pynput 全局鼠标监听（左键或右键拖拽移动窗口）")
             except Exception as e:
                 logger.exception("启动 pynput 监听器失败: %s", e)
             return
@@ -327,7 +332,7 @@ class Live2DAnimationManager:
                 logger.error(f"WH_MOUSE_LL 钩子安装失败！错误码: {err}")
                 return
 
-            logger.info("💡 提示：在形象上右键拖拽即可移动窗口（不会影响其他窗口的右键菜单）")
+            logger.info("💡 提示：在形象上左键或右键拖拽即可移动窗口（不会影响其他窗口的右键菜单）")
 
             # 消息泵：用阻塞式 GetMessageW 驱动钩子回调
             msg = ctypes.wintypes.MSG()

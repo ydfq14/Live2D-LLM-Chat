@@ -12,7 +12,7 @@
 import asyncio
 import os
 import threading
-from typing import Callable, TypeVar, Any, Optional, Coroutine
+from typing import Callable, TypeVar, Any, Optional, Awaitable
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 from log_config import get_logger
@@ -135,7 +135,7 @@ class AsyncWrapper:
             loop.run_in_executor(self.executor, wrapper), timeout=timeout
         )
 
-    def async_wrap(self, func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
+    def async_wrap(self, func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
         """
         装饰器：将同步函数包装为异步函数
 
@@ -190,7 +190,7 @@ class AsyncWrapper:
                     print("超时了")
         """
 
-        def decorator(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
+        def decorator(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
             @wraps(func)
             async def async_func(*args, **kwargs):
                 return await self.run_sync_with_timeout(func, timeout, *args, **kwargs)
@@ -294,7 +294,7 @@ async def run_sync_with_timeout(
     )
 
 
-def async_wrap(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
+def async_wrap(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
     """
     便捷装饰器：包装同步函数为异步
 

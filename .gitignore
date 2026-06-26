@@ -7,13 +7,6 @@ __pycache__/
 .models/
 models/
 
-# --- 本地 AI 模型（CosyVoice / SenseVoice）---
-TTS_env/CosyVoice/*
-!TTS_env/CosyVoice/.gitkeep
-
-ASR_env/SenseVoice/*
-!ASR_env/SenseVoice/.gitkeep
-
 # --- Python 虚拟环境 / IDE ---
 .venv/
 .idea/
@@ -42,6 +35,11 @@ TTS_env/voice_history/*.wav
 TTS_env/tmp/*
 !TTS_env/tmp/.gitkeep
 
+# --- Piper TTS 模型 ---
+TTS_env/piper/*.onnx
+TTS_env/piper/*.onnx.json
+!TTS_env/piper/.gitkeep
+
 # --- ASR 输入音频 ---
 ASR_env/input_voice/*.wav
 
@@ -55,3 +53,13 @@ LLM_env/conversation_history.txt
 models/
 # --- 安全数据库（Chroma 向量库）---
 safety_db/
+
+# --- MOSS-TTS-Nano 参考音频 ---
+TTS_env/prompt_audio/*.wav
+!TTS_env/prompt_audio/.gitkeep
+
+# --- HuggingFace xet 日志 ---
+.models/huggingface/xet/
+
+# --- Milvus 锁文件 ---
+plugins_data/agentic_rag/kb.db/LOCK
