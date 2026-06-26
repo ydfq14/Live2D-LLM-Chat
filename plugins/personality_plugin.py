@@ -209,118 +209,123 @@ class PersonalityPlugin(PluginBase):
         # 如果清理后为空或没有变化，返回 None 表示不做修改
         return text if text != self._last_clean else None
 
+    # ═══════════════ 前端调用接口 ═══════════════
+
+    def get_current_personality(self) -> str:
+        """供前端调用的接口，返回当前性格信息"""
+        p = self._profiles.get(self.current, {})
+        return json.dumps({
+            "name": p.get("name", "默认"),
+            "voice": p.get("voice", ""),
+        }, ensure_ascii=False)
 
     # ═══════════════ 前端 HTML 面板 ═══════════════
 
     def get_frontend_html(self) -> str:
-        """
-        返回性格选择面板的 HTML。
-
-        嵌入到 pywebview 前端窗口的 Tab 页中，
-        显示所有性格的卡片，点击卡片触发切换。
-        """
+        """生成性格选择面板 HTML，包含当前性格状态头和选择卡片"""
         if not self._profiles:
             return "<p style='color:#aaa;'>未加载性格配置</p>"
 
-        # 逐个生成性格卡片
+        current_profile = self._profiles.get(self.current, {})
+        current_name = current_profile.get("name", "未知")
+        current_voice = current_profile.get("voice", "默认")
+
+        # 生成所有性格卡片
         cards = ""
         for key, profile in self._profiles.items():
-            # 当前激活的性格高亮
             active_class = "active" if key == self.current else ""
-
-            # 风格标签
-            tags_html = ""
-            for tag in profile.get("style_tags", []):
-                tags_html += f"<span class=\"tag\">{tag}</span>"
-
-            # 欢迎语
+            tags_html = " ".join(
+                f"<span class='tag'>{t}</span>"
+                for t in profile.get("style_tags", [])
+            )
             greeting = profile.get("greeting", "")
+            cards += (
+                f"<div class='p-card {active_class}' data-key='{key}'"
+                f" onclick=\"switchPersonality('{key}')\">"
+                f"<div class='p-header'>"
+                f"<span class='p-name'>{profile['name']}</span>"
+                f"<span class='p-voice'>🎤 {profile.get('voice', '默认')}</span>"
+                f"</div>"
+                f"<div class='p-tags'>{tags_html}</div>"
+                f"<div class='p-greet'>{greeting}</div>"
+                f"</div>"
+            )
 
-            cards += f"""
-            <div class="p-card {active_class}"
-                 onclick="switchPersonality('{key}')">
-                <div class="p-header">
-                    <span class="p-name">{profile['name']}</span>
-                    <span class="p-voice">\U0001f3a4 {profile.get('voice', '默认')}</span>
-                </div>
-                <div class="p-tags">{tags_html}</div>
-                <div class="p-greet">{greeting}</div>
-            </div>"""
+        return """<style>
+.p-status-bar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px; margin-bottom:16px;
+    background:linear-gradient(135deg,#0f3460,#1a1a4a);
+    border:1px solid rgba(0,240,255,0.2); border-radius:10px;
+}
+.p-status-label { font-size:12px; color:#7a7a9e; }
+.p-status-current {
+    font-size:18px; font-weight:700; color:#00f0ff;
+    text-shadow:0 0 10px rgba(0,240,255,0.3);
+}
+.p-status-voice { font-size:13px; color:#7a7a9e; text-align:right; }
+.p-status-voice span { color:#e8e8f0; }
+.p-card {
+    padding:14px; margin:10px 0; background:#1a1a3a;
+    border:1px solid rgba(255,255,255,0.08); border-radius:10px;
+    cursor:pointer; transition:all 0.25s ease; position:relative;
+}
+.p-card:hover { border-color:#00f0ff; background:#222250; }
+.p-card.active {
+    border-color:#00f0ff; box-shadow:0 0 15px rgba(0,240,255,0.3);
+    background:#1a1a4a;
+}
+.p-card.active::after {
+    content:"✔ 当前";
+    position:absolute; top:8px; right:12px; font-size:11px; color:#00f0ff;
+}
+.p-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.p-name { font-size:16px; font-weight:600; color:#e8e8f0; }
+.p-voice { font-size:13px; color:#00f0ff; }
+.p-tags { margin-bottom:6px; }
+.tag {
+    display:inline-block; padding:2px 10px; margin:2px 4px 2px 0;
+    background:#0f3460; border-radius:12px; font-size:11px; color:#7a7a9e;
+}
+.p-card.active .tag { background:#1a5080; color:#00f0ff; }
+.p-greet { font-size:12px; color:#7a7a9e; font-style:italic; }
+</style>
 
-        # 完整 HTML + CSS + JS
-        return f"""
-        <style>
-        .p-card {{
-            padding: 14px;
-            margin: 10px 0;
-            background: #1a1a3a;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.25s ease;
-        }}
-        .p-card:hover {{
-            border-color: #00f0ff;
-            background: #222250;
-        }}
-        .p-card.active {{
-            border-color: #00f0ff;
-            box-shadow: 0 0 15px rgba(0,240,255,0.3);
-            background: #1a1a4a;
-        }}
-        .p-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }}
-        .p-name {{
-            font-size: 16px;
-            font-weight: 600;
-            color: #e8e8f0;
-        }}
-        .p-voice {{
-            font-size: 13px;
-            color: #00f0ff;
-        }}
-        .p-tags {{ margin-bottom: 6px; }}
-        .tag {{
-            display: inline-block;
-            padding: 2px 10px;
-            margin: 2px 4px 2px 0;
-            background: #0f3460;
-            border-radius: 12px;
-            font-size: 11px;
-            color: #7a7a9e;
-        }}
-        .p-card.active .tag {{
-            background: #1a5080;
-            color: #00f0ff;
-        }}
-        .p-greet {{
-            font-size: 12px;
-            color: #7a7a9e;
-            font-style: italic;
-        }}
-        </style>
+<div class='p-status-bar' id='p-status-bar'>
+<div>
+<div class='p-status-label'>当前性格</div>
+<div class='p-status-current' id='p-current-name'>""" + current_name + """</div>
+</div>
+<div class='p-status-voice'>
+音色<br>
+<span id='p-current-voice'>""" + current_voice + """</span>
+</div>
+</div>
 
-        <h3 style="color:#00f0ff; margin-bottom:16px;">\U0001f3ad 选择性格</h3>
+<h3 style='color:#00f0ff;margin-bottom:12px;font-size:14px;'>切换性格</h3>
 
-        <div id="p-list">
-            {cards}
-        </div>
+<div id='p-list'>""" + cards + """</div>
 
-        <script>
-        function switchPersonality(name) {{
-            document.querySelectorAll('.p-card').forEach(function(c) {{
-                c.classList.remove('active');
-            }});
-            pywebview.api.call_plugin('personality', 'switch_personality', name)
-                .then(function(r) {{
-                    var result = JSON.parse(r);
-                    if (result.ok) {{
-                        console.log('性格已切换: ' + result.name);
-                    }}
-                }});
-        }}
-        </script>"""
+<script>
+function switchPersonality(name) {
+    document.querySelectorAll('.p-card').forEach(function(c) {
+        c.classList.remove('active');
+    });
+    pywebview.api.call_plugin('personality', 'switch_personality', name)
+        .then(function(r) {
+            var result = JSON.parse(r);
+            if (result.ok) {
+                document.getElementById('p-current-name').textContent = result.name;
+                if (result.voice) {
+                    document.getElementById('p-current-voice').textContent = result.voice;
+                }
+                var cards = document.querySelectorAll('.p-card');
+                cards.forEach(function(c) {
+                    if (c.getAttribute('data-key') === name) {
+                        c.classList.add('active');
+                    }
+                });
+            }
+        });
+}
+</script>"""
