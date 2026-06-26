@@ -137,11 +137,7 @@ class PersonalityPlugin(PluginBase):
     # ═══════════════ 性格应用与切换 ═══════════════
 
     def _apply(self, name: str) -> None:
-        """
-        应用指定性格，做两件事：
-        1. 替换 LLM 对话上下文中的 system prompt
-        2. 切换 TTS 音色（云端用 set_voice，本地用 set_voice_sample）
-        """
+        """应用性格：替换 prompt + 重置对话历史 + 切换音色"""
         profile = self._profiles.get(name)
         if not profile:
             logger.error("[personality] 性格不存在: %s", name)
@@ -150,15 +146,26 @@ class PersonalityPlugin(PluginBase):
         # 第一步：替换 LLM 的 system prompt
         if self.app and self.app.llm_manager:
             self.app.llm_manager.conversation[0]["content"] = profile["system_prompt"]
+            # 重置对话历史：只保留 system prompt，删除旧的多轮回复
+            # 因为旧回复是旧性格的说话方式，会干扰 LLM
+            old_msgs = self.app.llm_manager.conversation[1:]  # 保存旧消息用于日志
+            self.app.llm_manager.conversation = self.app.llm_manager.conversation[:1]  # 只留第0条
+            # 重置对话摘要（如果有的话）
+            self.app.llm_manager.conversation_summary = ""
+            self.app.llm_manager.user_message_count = 0
+            logger.debug("[personality] 已清除旧的对话历史 (%d 条消息)", len(old_msgs))
+            # 添加角色切换提示
+            self.app.llm_manager.conversation.append({
+                "role": "assistant",
+                "content": f"好的，已切换到{profile['name']}。"
+            })
 
         # 第二步：切换 TTS 音色
         if self.app and self.app.tts_manager:
             try:
                 if self.app.tts_manager.mode == "cloud":
-                    # 云端 MIMO TTS：直接传音色名称
                     self.app.tts_manager.set_voice(profile.get("voice", "mimo_default"))
                 else:
-                    # 本地 CosyVoice：替换音色样本文件
                     wav = profile.get("prompt_wav", "")
                     txt = profile.get("prompt_text", "")
                     if wav and txt:
@@ -169,29 +176,6 @@ class PersonalityPlugin(PluginBase):
         self.current = name
         logger.info("[personality] 已切换性格: %s (音色: %s)",
                     profile["name"], profile.get("voice", "默认"))
-
-    def switch_personality(self, name: str) -> str:
-        """
-        前端切换性格的入口方法。
-
-        前端通过 pywebview 桥接调用：
-            pywebview.api.call_plugin('personality', 'switch_personality', 'tutor')
-
-        返回 JSON 字符串：
-            {"ok": true, "name": "知性老师", "voice": "白桦"}
-            或 {"error": "性格 tutor 不存在"}
-        """
-        if name not in self._profiles:
-            return json.dumps({"error": f"性格 {name} 不存在"}, ensure_ascii=False)
-
-        self._apply(name)
-        profile = self._profiles[name]
-        return json.dumps({
-            "ok": True,
-            "name": profile["name"],
-            "voice": profile.get("voice", ""),
-        }, ensure_ascii=False)
-
     # ═══════════════ Hook 方法 ═══════════════
 
     def on_llm_context(self, user_input: str) -> str:
