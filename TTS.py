@@ -1,5 +1,6 @@
 
 import os
+import sys
 import time
 import types
 import base64
@@ -63,38 +64,56 @@ def download_piper_model(model_path: str) -> None:
             else:
                 download_url = original_url
 
-            logger.info(f"正在下载: {repo_file}")
-            logger.info(f"  来源: {download_url}")
+            # 先用镜像尝试，失败则回退到官方 Hub
+            urls_to_try = [download_url]
+            if download_url != original_url:
+                urls_to_try.append(original_url)
 
-            # 下载文件（带进度显示）
-            response = requests.get(download_url, stream=True, timeout=300)
-            response.raise_for_status()
+            last_err = None
+            for url in urls_to_try:
+                try:
+                    logger.info(f"正在下载: {repo_file}")
+                    logger.info(f"  来源: {url}")
 
-            # 获取文件总大小
-            total_size = int(response.headers.get('content-length', 0))
-            if total_size > 0:
-                logger.info(f"  文件大小: {total_size / 1024 / 1024:.1f} MB")
+                    # 下载文件（带进度显示）
+                    response = requests.get(url, stream=True, timeout=300)
+                    response.raise_for_status()
 
-            downloaded_size = 0
-            last_progress = 0  # 上次显示进度的百分比
+                    # 获取文件总大小
+                    total_size = int(response.headers.get('content-length', 0))
+                    if total_size > 0:
+                        logger.info(f"  文件大小: {total_size / 1024 / 1024:.1f} MB")
 
-            # 写入文件（带进度更新）
-            with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
+                    downloaded_size = 0
+                    last_progress = 0  # 上次显示进度的百分比
 
-                        # 显示下载进度（每5%显示一次）
-                        if total_size > 0:
-                            progress = (downloaded_size / total_size) * 100
-                            if progress - last_progress >= 5:
-                                downloaded_mb = downloaded_size / 1024 / 1024
-                                total_mb = total_size / 1024 / 1024
-                                logger.info(f"  进度: {progress:.1f}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
-                                last_progress = progress
+                    # 写入文件（带进度更新）
+                    with open(local_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded_size += len(chunk)
 
-            logger.info(f"  下载完成: {local_path.name} ({local_path.stat().st_size / 1024 / 1024:.1f} MB)")
+                                # 显示下载进度（每5%显示一次）
+                                if total_size > 0:
+                                    progress = (downloaded_size / total_size) * 100
+                                    if progress - last_progress >= 5:
+                                        downloaded_mb = downloaded_size / 1024 / 1024
+                                        total_mb = total_size / 1024 / 1024
+                                        logger.info(f"  进度: {progress:.1f}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
+                                        last_progress = progress
+
+                    logger.info(f"  下载完成: {local_path.name} ({local_path.stat().st_size / 1024 / 1024:.1f} MB)")
+                    break  # 成功，跳出重试循环
+
+                except Exception as err:
+                    last_err = err
+                    if url != urls_to_try[-1]:
+                        logger.warning(f"镜像下载失败: {err}，尝试官方 Hub...")
+                    continue
+            else:
+                # 所有 URL 都失败
+                raise last_err
 
     except Exception as e:
         logger.error(f"下载失败: {e}")
@@ -104,16 +123,18 @@ def download_piper_model(model_path: str) -> None:
 
 
 class TTSManager:
-    def __init__(self, mode=None, api_url=None):
+    def __init__(self, mode=None):
         """
-        初始化 TTS 管理器，支持本地（CosyVoice）和云端（MIMO）两种模式。
+        初始化 TTS 管理器，支持三种模式：
+        - "local": 本地 piper-tts
+        - "cloud": 云端 MIMO TTS
+        - "moss": 本地 MOSS-TTS-Nano ONNX
 
-        :param mode: "local" 或 "cloud"，不传则读取 Config.TTS_MODE
-        :param api_url: 本地 CosyVoice API 地址（仅本地模式使用）
+        :param mode: "local"、"cloud" 或 "moss"，不传则读取 Config.TTS_MODE
         """
         self.mode = mode or Config.TTS_MODE
-        if self.mode not in ("local", "cloud"):
-            raise ValueError(f"TTS_MODE 必须为 'local' 或 'cloud'，当前为: {self.mode}")
+        if self.mode not in ("local", "cloud", "moss"):
+            raise ValueError(f"TTS_MODE 必须为 'local'、'cloud' 或 'moss'，当前为: {self.mode}")
 
         # 输出目录（两种模式共用）
         self.output_dir = Config.TTS_OUTPUT_DIR
@@ -153,6 +174,69 @@ class TTSManager:
             self.noise_w = Config.PIPER_NOISE_W
             self.history_dir = Config.TTS_HISTORY_DIR
             os.makedirs(self.history_dir, exist_ok=True)
+
+        elif self.mode == "moss":
+            # --- MOSS-TTS-Nano ONNX 本地初始化 ---
+            logger.info("TTS 初始化: moss (MOSS-TTS-Nano ONNX)")
+            moss_dir = Config.MOSS_TTS_NANO_DIR
+            if not os.path.isdir(moss_dir):
+                raise FileNotFoundError(
+                    f"MOSS-TTS-Nano 目录不存在: {moss_dir}\n"
+                    f"请克隆 MOSS-TTS-Nano 到该路径，或修改 Config.MOSS_TTS_NANO_DIR"
+                )
+            # MOSS-TTS-Nano 顶层脚本使用裸 import，需将其根目录加入 sys.path
+            if moss_dir not in sys.path:
+                sys.path.insert(0, moss_dir)
+            try:
+                from onnx_tts_runtime import OnnxTtsRuntime, ensure_browser_onnx_model_dir
+            except ImportError as e:
+                logger.error("无法导入 MOSS-TTS-Nano ONNX 模块: %s", e)
+                raise ImportError(
+                    "MOSS-TTS-Nano 模块导入失败。请确认:\n"
+                    f"  1. 目录存在: {moss_dir}\n"
+                    "  2. 已安装依赖: pip install onnxruntime sentencepiece numpy torchaudio huggingface_hub"
+                ) from e
+
+            model_dir = ensure_browser_onnx_model_dir(Config.MOSS_MODEL_DIR)
+            self.moss_runtime = OnnxTtsRuntime(
+                model_dir=model_dir,
+                thread_count=Config.MOSS_CPU_THREADS,
+                max_new_frames=Config.MOSS_MAX_NEW_FRAMES,
+                execution_provider=Config.MOSS_EXECUTION_PROVIDER,
+                output_dir=self.output_dir,
+            )
+            self.moss_voice = Config.MOSS_VOICE
+            self.moss_prompt_audio_path = Config.MOSS_PROMPT_AUDIO_PATH
+
+            # 预编码参考音频并缓存，避免每次合成都重新加载和编码
+            if self.moss_prompt_audio_path:
+                logger.info("预编码参考音频: %s", self.moss_prompt_audio_path)
+                self.moss_prompt_audio_codes = self.moss_runtime.encode_reference_audio(
+                    self.moss_prompt_audio_path
+                )
+                logger.info("参考音频编码完成，共 %d 帧", len(self.moss_prompt_audio_codes))
+                # 注册为临时内置音色，后续合成时通过 voice 名称引用
+                self.moss_voice = "_custom_cached"
+                self.moss_runtime.manifest.setdefault("builtin_voices", [])
+                self.moss_runtime.manifest["builtin_voices"] = [
+                    v for v in self.moss_runtime.manifest["builtin_voices"]
+                    if v.get("voice") != "_custom_cached"
+                ]
+                self.moss_runtime.manifest["builtin_voices"].append({
+                    "voice": "_custom_cached",
+                    "prompt_audio_codes": self.moss_prompt_audio_codes,
+                })
+            else:
+                self.moss_prompt_audio_codes = None
+
+            self.history_dir = Config.TTS_HISTORY_DIR
+            os.makedirs(self.history_dir, exist_ok=True)
+            logger.info(
+                "✔ TTS 本地模式 (MOSS-TTS-Nano ONNX) 初始化成功, "
+                "voice=%s, threads=%d, provider=%s",
+                self.moss_voice, Config.MOSS_CPU_THREADS, Config.MOSS_EXECUTION_PROVIDER,
+            )
+
         else:
             logger.info(f"TTS 初始化: cloud, model={Config.MIMO_TTS_MODEL}, voice={Config.MIMO_TTS_VOICE}")
             self.api_key = Config.MIMO_API_KEY
@@ -177,11 +261,13 @@ class TTSManager:
 
         if self.mode == "local":
             return self._synthesize_local(text)
+        elif self.mode == "moss":
+            return self._synthesize_moss(text)
         else:
             return self._synthesize_cloud(text)
 
     # ------------------------------------------------------------------
-    # 本地合成：CosyVoice（通过 gradio_client）
+    # 工具方法
     # ------------------------------------------------------------------
 
     def clear_output_directory(self):
@@ -339,6 +425,58 @@ class TTSManager:
             f.write(audio_bytes)
 
         logger.info(f"▶ TTS 完成 (cloud)，耗时: {time.time() - start_time:.2f}s，文件: {output_path}")
+        return output_path
+
+    # ------------------------------------------------------------------
+    # 本地合成：MOSS-TTS-Nano (ONNX)
+    # ------------------------------------------------------------------
+
+    def _synthesize_moss(self, text):
+        """
+        使用 MOSS-TTS-Nano ONNX 后端进行本地语音合成。
+
+        :param text: 待合成的文本
+        :return: 生成的音频文件路径
+        """
+        self.clear_output_directory()
+
+        start_time = time.time()
+        timestamp = int(time.time() * 1000)
+        output_path = os.path.join(self.output_dir, f"tts_output_{timestamp}.wav")
+
+        try:
+            logger.info(
+                "调用 MOSS-TTS-Nano: text='%s...', voice=%s",
+                text[:30], self.moss_voice,
+            )
+
+            result = self.moss_runtime.synthesize(
+                text=text,
+                voice=self.moss_voice,
+                output_audio_path=output_path,
+                do_sample=True,
+                streaming=False,
+                max_new_frames=Config.MOSS_MAX_NEW_FRAMES,
+                voice_clone_max_text_tokens=75,
+                enable_wetext=False,
+                enable_normalize_tts_text=False,
+            )
+            output_path = result["audio_path"]
+            logger.info("MOSS-TTS-Nano 合成完成，文件: %s", output_path)
+
+        except Exception as e:
+            logger.error("MOSS-TTS-Nano 合成失败: %s", e)
+            import traceback
+            traceback.print_exc()
+            return None
+
+        elapsed = time.time() - start_time
+        logger.info("TTS 完成 (moss/MOSS-TTS-Nano)，耗时: %.2fs，文件: %s", elapsed, output_path)
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            logger.error("合成失败：输出文件为空或不存在 %s", output_path)
+            return None
+
         return output_path
 
     # ------------------------------------------------------------------

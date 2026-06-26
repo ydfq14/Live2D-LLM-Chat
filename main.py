@@ -129,9 +129,10 @@ def _select_deployment_mode():
     print("  选项:")
     print("    1. local (本地 piper-tts)")
     print("    2. cloud (云端 MIMO)")
-    print("    3. 使用当前配置 (回车)")
+    print("    3. moss (本地 MOSS-TTS-Nano)")
+    print("    4. 使用当前配置 (回车)")
 
-    tts_choice = input("\n请选择 TTS 模式 [1/2/3]: ").strip()
+    tts_choice = input("\n请选择 TTS 模式 [1/2/3/4]: ").strip()
 
     if tts_choice == "1":
         Config.TTS_MODE = "local"
@@ -139,6 +140,9 @@ def _select_deployment_mode():
     elif tts_choice == "2":
         Config.TTS_MODE = "cloud"
         print("  ✓ TTS 已设置为: cloud (云端)")
+    elif tts_choice == "3":
+        Config.TTS_MODE = "moss"
+        print("  ✓ TTS 已设置为: moss (本地 MOSS-TTS-Nano)")
     else:
         print(f"  ✓ TTS 保持当前配置: {Config.TTS_MODE}")
 

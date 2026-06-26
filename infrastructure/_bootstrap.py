@@ -15,6 +15,73 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _MODELS_DIR = os.path.join(_PROJECT_ROOT, ".models")
 
 
+def _patch_hf_hub_download_with_fallback():
+    """
+    Monkey-patch huggingface_hub 的 snapshot_download 和 hf_hub_download，
+    使它们在镜像下载失败时自动回退到官方 Hub。
+    """
+    try:
+        import huggingface_hub
+        from huggingface_hub import hf_hub_download as _orig_hf_hub_download
+        from huggingface_hub import snapshot_download as _orig_snapshot_download
+        import functools
+    except ImportError:
+        return
+
+    mirror_endpoint = "https://hf-mirror.com"
+    official_endpoint = "https://huggingface.co"
+    hf_endpoint = os.environ.get("HF_ENDPOINT", "")
+
+    if mirror_endpoint not in hf_endpoint:
+        return  # 未使用镜像，无需回退
+
+    def _make_fallback(original_fn):
+        @functools.wraps(original_fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return original_fn(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                is_network_error = any(kw in err_str for kw in (
+                    "does not seem to be on huggingface",
+                    "connection", "timeout", "ssl", "distant resource",
+                    "localentrynotfounderror",
+                ))
+                if not is_network_error:
+                    raise
+
+                import logging
+                log = logging.getLogger(__name__)
+                log.warning(
+                    "HuggingFace 镜像 (%s) 下载失败，自动回退到官方 Hub...", mirror_endpoint
+                )
+                # 临时切换到官方端点
+                old_endpoint = os.environ.get("HF_ENDPOINT")
+                os.environ["HF_ENDPOINT"] = official_endpoint
+                try:
+                    huggingface_hub.constants.HF_ENDPOINT = official_endpoint
+                except Exception:
+                    pass
+                log.info("HF_ENDPOINT 已切换为: %s (常量: %s)",
+                         os.environ.get("HF_ENDPOINT"),
+                         getattr(huggingface_hub.constants, "HF_ENDPOINT", "N/A"))
+                try:
+                    result = original_fn(*args, **kwargs)
+                    log.info("官方 Hub 下载成功")
+                    return result
+                finally:
+                    if old_endpoint:
+                        os.environ["HF_ENDPOINT"] = old_endpoint
+                    try:
+                        huggingface_hub.constants.HF_ENDPOINT = old_endpoint or official_endpoint
+                    except Exception:
+                        pass
+        return wrapper
+
+    huggingface_hub.snapshot_download = _make_fallback(_orig_snapshot_download)
+    huggingface_hub.hf_hub_download = _make_fallback(_orig_hf_hub_download)
+
+
 def apply() -> None:
     """设置环境变量，将所有模型缓存重定向到项目 .models/ 目录。
 
@@ -53,6 +120,9 @@ def apply() -> None:
     except ImportError:
         # huggingface_hub 还未导入，稍后会在使用时读取环境变量
         pass
+
+    # --- 全局回退：镜像下载失败时自动切换到官方 Hub ---
+    _patch_hf_hub_download_with_fallback()
 
 
 # 导入时自动生效

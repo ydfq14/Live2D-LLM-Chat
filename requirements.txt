@@ -3,8 +3,10 @@
 # 安装方式: pip install -r requirements.txt
 # ============================================================
 
-# ==================== PyTorch CUDA 12.8 索引 ====================
---index-url https://download.pytorch.org/whl/cu128
+# 主源：通用库(jieba/pymilvus/chromadb等)
+--index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 附加源：CUDA128 PyTorch
+--extra-index-url https://download.pytorch.org/whl/cu128
 
 # ==================== 核心依赖（本地+云端模式都需要） ====================
 requests          # HTTP 请求（云端 API 调用）
@@ -17,10 +19,10 @@ pyautogui         # 鼠标位置监听（眼神跟随）
 live2d-py         # Live2D 模型加载与渲染
 langgraph         # LangGraph 智能体引擎（StateGraph 图流转）
 
-# ==================== PyTorch（CUDA 12.8 版本）====================
-torch             # PyTorch（CUDA 12.8）
-torchvision       # PyTorch 视觉模块
-torchaudio        # PyTorch 音频模块
+# ==================== PyTorch（CUDA 12.8 强制GPU版本）====================
+torch==2.7.0+cu128
+torchvision==0.22.0+cu128
+torchaudio==2.7.0+cu128
 
 # ==================== LLM 模块 ====================
 openai            # OpenAI SDK（支持 OpenAI / DeepSeek / MiMo 兼容接口）

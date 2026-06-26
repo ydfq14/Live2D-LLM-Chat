@@ -17,6 +17,7 @@ if _env_path.exists():
 # ============================================================
 # 自动设置 HuggingFace 镜像（国内加速）
 # 如果用户没有设置 HF_ENDPOINT，自动使用镜像避免网络超时
+# 镜像下载失败时会自动回退到 huggingface.co（参见 infrastructure/_bootstrap.py）
 # ============================================================
 if not os.environ.get("HF_ENDPOINT"):
     os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
@@ -45,7 +46,7 @@ class Config:
     VAD_SPEECH_PADDING = 0.2          # 语音开始前保留的音频秒数，避免截断开头
 
     # ==================== TTS（文本转语音）配置 ====================
-    TTS_MODE = "cloud"  # "local" or "cloud" ; 本地 piper-tts 或云端 MIMO
+    TTS_MODE = "cloud"  # "local", "cloud", or "moss"; 本地 piper / 云端 MIMO / 本地 MOSS-TTS-Nano
     TTS_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "TTS_env/output_voice/")
     TTS_HISTORY_DIR = os.path.join(PROJECT_ROOT, "TTS_env/voice_history/")
     TTS_CLEANUP_MODE = "move"  # "delete" or "move"; 配置文件清理方式（delete: 删除 | move: 归档）
@@ -80,6 +81,22 @@ class Config:
     MIMO_TTS_VOICE = "冰糖"                 # 预置音色 ID
     MIMO_TTS_FORMAT = "wav"                 # wav | pcm16
     MIMO_TTS_STYLE = "语速适中、自然亲切"    # 自然语言风格描述（可选）
+
+    # ==================== MOSS-TTS-Nano 本地 ONNX 配置 ====================
+    # MOSS-TTS-Nano 安装目录（需 pip install -e . 或手动添加到 sys.path）
+    MOSS_TTS_NANO_DIR = r"D:\Project\Visual Studio Code\MOSS-TTS-Nano-main"
+
+    # ONNX 模型目录（None = 自动从 HuggingFace 下载）
+    MOSS_MODEL_DIR = None  # str | None
+
+    # ONNX 推理配置
+    MOSS_CPU_THREADS = 4               # onnxruntime 线程数
+    MOSS_EXECUTION_PROVIDER = "cpu"    # "cpu" 或 "cuda"
+    MOSS_MAX_NEW_FRAMES = 375          # 最大生成帧数（控制最大音频长度）
+
+    # 语音配置
+    MOSS_VOICE = "Xiaoyu"              # 内置音色（Xiaoyu/Yuewen/Lingyu/Junhao/Zhiming/Weiguo 等）
+    MOSS_PROMPT_AUDIO_PATH = os.path.join(PROJECT_ROOT, "TTS_env/prompt_audio/my_voice.wav")      # str | None; 自定义提示音频路径（覆盖内置音色）
 
     # ==================== LLM（大语言模型）配置 ====================
     LLM_MODE = "local"              # "local" or "cloud"
