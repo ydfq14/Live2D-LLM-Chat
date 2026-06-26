@@ -32,21 +32,55 @@ infrastructure._bootstrap.verify_hf_endpoint()
 def _select_deployment_mode():
     """交互式选择 ASR、LLM、TTS 的部署模式（本地/云端）"""
 
-    # 检查命令行参数，如果指定 --auto 则跳过选择
+    # 检查命令行参数，如果指定 --auto 则跳过选择，使用云端默认配置
     if "--auto" in sys.argv:
-        print("\n使用 --auto 参数，跳过模式选择，使用默认配置")
+        print("\n使用 --auto 参数，跳过模式选择，使用默认配置（云端API）")
+        Config.ASR_MODE = "cloud"
+        Config.LLM_MODE = "cloud"
+        Config.TTS_MODE = "cloud"
         print(f"  ASR: {Config.ASR_MODE}")
         print(f"  LLM: {Config.LLM_MODE}")
         print(f"  TTS: {Config.TTS_MODE}")
         return True
 
     print("\n" + "="*60)
-    print("VirtuMate 部署模式选择")
+    print("VirtuMate 启动配置选择")
     print("="*60)
-    print("\n请选择各模块的部署方式：")
-    print("  1. 本地 (Local) - 使用本地模型，离线可用")
-    print("  2. 云端 (Cloud) - 使用云端 API，需要网络\n")
-    print("提示：直接按回车使用当前配置\n")
+    print("\n请选择启动模式：\n")
+    print("  1. 快速启动（默认配置） - ASR/LLM/TTS 全部使用云端API，开箱即用")
+    print("  2. 手动配置 - 逐一选择 ASR、LLM、TTS 的部署方式（本地/云端）")
+    print("  3. 使用当前配置 - 直接按回车\n")
+
+    choice = input("请选择 [1/2/3]: ").strip()
+
+    if choice == "1":
+        # 使用云端默认配置
+        Config.ASR_MODE = "cloud"
+        Config.LLM_MODE = "cloud"
+        Config.TTS_MODE = "cloud"
+        print("\n✓ 已选择快速启动（云端默认配置）")
+        print(f"  ASR: {Config.ASR_MODE} (MIMO)")
+        print(f"  LLM: {Config.LLM_MODE} (DeepSeek)")
+        print(f"  TTS: {Config.TTS_MODE} (MIMO)")
+        print("="*60 + "\n")
+        return True
+    elif choice == "2":
+        # 手动选择配置
+        pass  # 继续执行下面的手动选择逻辑
+    else:
+        # 使用当前配置，跳过选择
+        print(f"\n✓ 使用当前配置直接启动")
+        print(f"  ASR: {Config.ASR_MODE}")
+        print(f"  LLM: {Config.LLM_MODE}")
+        print(f"  TTS: {Config.TTS_MODE}")
+        print("="*60 + "\n")
+        return True
+
+    # 手动选择模式（原来的逻辑）
+    print("\n" + "-"*60)
+    print("手动配置 ASR/LLM/TTS 模式")
+    print("-"*60)
+    print("\n提示：直接按回车使用当前配置\n")
 
     # ASR 选择
     print("-"*60)
