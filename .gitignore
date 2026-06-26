@@ -53,3 +53,13 @@ LLM_env/conversation_history.txt
 models/
 # --- 安全数据库（Chroma 向量库）---
 safety_db/
+
+# --- MOSS-TTS-Nano 参考音频 ---
+TTS_env/prompt_audio/*.wav
+!TTS_env/prompt_audio/.gitkeep
+
+# --- HuggingFace xet 日志 ---
+.models/huggingface/xet/
+
+# --- Milvus 锁文件 ---
+plugins_data/agentic_rag/kb.db/LOCK
