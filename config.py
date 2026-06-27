@@ -108,7 +108,7 @@ class Config:
 
     # --- 本地 LLM（LM Studio）---
     LOCAL_LLM_MODEL_NAME = "deepseek-r1-distill-qwen-1.5b"  # LM Studio 中加载的模型标识
-    LOCAL_LLM_API_URL = "http://http://127.0.0.1:1234/v1/chat/completions"
+    LOCAL_LLM_API_URL = "http://127.0.0.1:1234/v1/chat/completions"
 
     # --- 通用路径 ---
     LLM_TMP_DIR = os.path.join(PROJECT_ROOT, "TTS_env/tmp")
