@@ -267,6 +267,21 @@ class TTSManager:
             return self._synthesize_cloud(text)
 
     # ------------------------------------------------------------------
+    # 音色控制（供 personality 插件调用）
+    # ------------------------------------------------------------------
+
+    def set_voice(self, voice_name: str):
+        """切换云端 TTS 音色。可用音色: 冰糖, 茉莉, 苏打, 白桦, Mia, Chloe, Milo, Dean, mimo_default"""
+        self.tts_voice = voice_name
+        logger.info(f"TTS 音色已切换: {voice_name}")
+
+    def set_voice_sample(self, wav_path: str, text_path: str):
+        """切换本地 TTS 音色样本"""
+        self.prompt_wav_path = wav_path
+        self.prompt_text_path = text_path
+        logger.info(f"TTS 音色样本已切换: {wav_path}")
+        
+    # ------------------------------------------------------------------
     # 工具方法
     # ------------------------------------------------------------------
 
