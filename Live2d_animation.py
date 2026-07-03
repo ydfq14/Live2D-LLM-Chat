@@ -350,11 +350,21 @@ class Live2DAnimationManager:
         self._hook_thread = threading.Thread(target=hook_thread_main, daemon=True, name="mouse-hook")
         self._hook_thread.start()
 
-    # 停止钩子线程
+    # 停止钩子/监听器线程
     def _stop_global_mouse_listener(self):
-        """向钩子线程投递 WM_QUIT 让 GetMessageW 解除阻塞，然后等待线程退出"""
+        """停止全局鼠标监听器（pynput 或 WH_MOUSE_LL 钩子）"""
         self.running = False
-        if self._hook_thread and self._hook_thread.is_alive():
+        # 如果使用了 pynput 监听器，直接 stop 即可
+        if getattr(self, '_pynput_available', False) and getattr(self, '_pynput_listener', None):
+            try:
+                self._pynput_listener.stop()
+                logger.debug("pynput 鼠标监听器已停止")
+            except Exception:
+                pass
+            return
+
+        # 否则停止 WH_MOUSE_LL 钩子线程
+        if getattr(self, '_hook_thread', None) and self._hook_thread.is_alive():
             # PostThreadMessageW 发 WM_QUIT(0x0012) 唤醒阻塞中的 GetMessageW
             tid = ctypes.windll.kernel32.GetThreadId(
                 ctypes.windll.kernel32.OpenThread(0x0040, False, self._hook_thread.ident)
@@ -371,15 +381,21 @@ class Live2DAnimationManager:
         :param width: 窗口宽度
         :param height: 窗口高度
         :return: 初始化完成的Live2D模型对象
+        :raises RuntimeError: 模型文件缺失或损坏时抛出
         """
-        # 实例化Live2D V3模型加载类
-        model = LAppModel()
-        # 传入model3.json路径加载模型资源（纹理、骨骼、参数、动画）
-        model.LoadModelJson(self.model_path)
-        # 根据窗口宽高重置模型渲染画布尺寸
-        model.Resize(width, height)
-        # 返回加载完成的模型实例供渲染循环使用
-        return model
+        try:
+            # 实例化Live2D V3模型加载类
+            model = LAppModel()
+            # 传入model3.json路径加载模型资源（纹理、骨骼、参数、动画）
+            model.LoadModelJson(self.model_path)
+            # 根据窗口宽高重置模型渲染画布尺寸
+            model.Resize(width, height)
+            # 返回加载完成的模型实例供渲染循环使用
+            return model
+        except Exception as e:
+            logger.error(f"Live2D 模型加载失败，路径: {self.model_path}")
+            logger.error(f"错误详情: {e}")
+            raise RuntimeError(f"无法加载 Live2D 模型 ({self.model_path}): {e}") from e
 
     # 创建窗口、启动持续渲染循环，常驻显示Live2D角色
     def play_live2d_once(self):
@@ -413,6 +429,10 @@ class Live2DAnimationManager:
         # 调用自定义方法配置窗口透明、鼠标穿透、底部贴边
         self.configure_window(self.window, window_width, window_height)
 
+        # 显式将 OpenGL 上下文绑定到当前线程（子线程中必须调用，否则后续 gl 调用全部失败）
+        glfw.make_context_current(self.window)
+        logger.debug("OpenGL 上下文已绑定到当前线程")
+
         # 缓存 HWND 供钩子回调使用（钩子线程不能调用 GLFW）
         self._hwnd = glfw.get_win32_window(self.window)
 
@@ -421,6 +441,10 @@ class Live2DAnimationManager:
 
         # Live2D专用OpenGL函数初始化，绑定底层渲染接口
         glInit()
+
+        # glInit() 内部会重载 OpenGL 函数指针，可能导致 PyOpenGL 绑定表失效；
+        # 重新绑定上下文以刷新 PyOpenGL 的函数指针，避免后续 glEnable/glClear 等调用报 GL_INVALID_VALUE (1281)
+        glfw.make_context_current(self.window)
 
         # 加载模型到实例变量self.model，全局可访问
         self.model = self.load_live2d_model(window_width, window_height)
@@ -469,11 +493,13 @@ class Live2DAnimationManager:
                     ex = ctypes.windll.user32.GetWindowLongW(self._hwnd, GWL_EXSTYLE)
                     ex &= ~WS_EX_TRANSPARENT
                     ctypes.windll.user32.SetWindowLongW(self._hwnd, GWL_EXSTYLE, ex)
-                    # 读取窗口当前位置作为拖动起点
+                    # 读取窗口当前位置作为拖动起点（统一用 Win32 GetWindowRect，避免与 GLFW 双重读取偏差）
                     rect = ctypes.wintypes.RECT()
                     ctypes.windll.user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
                     self._drag_start_win = (rect.left, rect.top)
                     self._dragging = True
+                    # 同时清除 _need_drag_init，避免同帧重复初始化
+                    self._need_drag_init = False
                 except Exception:
                     pass
                 self._request_capture = False
@@ -490,11 +516,6 @@ class Live2DAnimationManager:
                     pass
                 self._request_release = False
 
-            if self._need_drag_init:
-                # 右键刚按下：在渲染线程读取窗口当前坐标作为拖动起点
-                wx, wy = glfw.get_window_pos(self.window)
-                self._drag_start_win = (wx, wy)
-                self._need_drag_init = False
             if self._has_pending_move:
                 glfw.set_window_pos(self.window, self._pending_win_x, self._pending_win_y)
                 self._has_pending_move = False
@@ -514,10 +535,13 @@ class Live2DAnimationManager:
         self.running = False
         # 循环退出后停止全局鼠标监听器，释放系统钩子
         self._stop_global_mouse_listener()
-        # 循环退出后停止所有音频播放
-        pygame.mixer.music.stop()
-        # 销毁pygame混音器，释放音频设备资源
-        pygame.mixer.quit()
+        # 循环退出后停止所有音频播放（仅当 mixer 已初始化时）
+        try:
+            if pygame.mixer.get_init():
+                pygame.mixer.music.stop()
+                pygame.mixer.quit()
+        except Exception:
+            pass
         # 全局销毁Live2D底层资源
         dispose()
         # 关闭GLFW窗口库，释放窗口、OpenGL上下文

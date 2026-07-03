@@ -1,6 +1,6 @@
 
 import os
-import sys
+
 import time
 import types
 import base64
@@ -177,24 +177,18 @@ class TTSManager:
 
         elif self.mode == "moss":
             # --- MOSS-TTS-Nano ONNX 本地初始化 ---
+            # 前提：已在当前 Python 环境中执行 pip install -e /path/to/MOSS-TTS-Nano
             logger.info("TTS 初始化: moss (MOSS-TTS-Nano ONNX)")
-            moss_dir = Config.MOSS_TTS_NANO_DIR
-            if not os.path.isdir(moss_dir):
-                raise FileNotFoundError(
-                    f"MOSS-TTS-Nano 目录不存在: {moss_dir}\n"
-                    f"请克隆 MOSS-TTS-Nano 到该路径，或修改 Config.MOSS_TTS_NANO_DIR"
-                )
-            # MOSS-TTS-Nano 顶层脚本使用裸 import，需将其根目录加入 sys.path
-            if moss_dir not in sys.path:
-                sys.path.insert(0, moss_dir)
             try:
                 from onnx_tts_runtime import OnnxTtsRuntime, ensure_browser_onnx_model_dir
             except ImportError as e:
                 logger.error("无法导入 MOSS-TTS-Nano ONNX 模块: %s", e)
                 raise ImportError(
-                    "MOSS-TTS-Nano 模块导入失败。请确认:\n"
-                    f"  1. 目录存在: {moss_dir}\n"
-                    "  2. 已安装依赖: pip install onnxruntime sentencepiece numpy torchaudio huggingface_hub"
+                    "MOSS-TTS-Nano 模块导入失败。\n"
+                    "请先安装 MOSS-TTS-Nano:\n"
+                    "  git clone https://github.com/OpenMOSS/MOSS-TTS-Nano.git\n"
+                    "  cd MOSS-TTS-Nano && pip install -r requirements.txt && pip install -e .\n"
+                    "然后安装运行依赖: pip install onnxruntime sentencepiece numpy torchaudio huggingface_hub"
                 ) from e
 
             model_dir = ensure_browser_onnx_model_dir(Config.MOSS_MODEL_DIR)
@@ -400,7 +394,7 @@ class TTSManager:
         # 1. 构造请求
         url = f"{self.base_url}/chat/completions"
         headers = {
-            "api-key": self.api_key,
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
 

@@ -63,7 +63,7 @@ class Config:
     # ==================== 云端 MIMO API 配置 ====================
     # 前往 https://platform.xiaomimimo.com 注册获取 API Key
     MIMO_API_KEY = os.getenv("MIMO_API_KEY", "")
-    MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"  # 按量付费；Token Plan 用 https://token-plan-cn.xiaomimimo.com/v1
+    MIMO_BASE_URL = "https://rainbowgate.top/v1"  # 按量付费；Token Plan 用 https://token-plan-cn.xiaomimimo.com/v1
 
     # ==================== Agentic RAG LLM 配置 ====================
     # 用于知识库智能检索的独立 LLM Agent（默认复用 MIMO 配置）
@@ -83,8 +83,7 @@ class Config:
     MIMO_TTS_STYLE = "语速适中、自然亲切"    # 自然语言风格描述（可选）
 
     # ==================== MOSS-TTS-Nano 本地 ONNX 配置 ====================
-    # MOSS-TTS-Nano 安装目录（需 pip install -e . 或手动添加到 sys.path）
-    MOSS_TTS_NANO_DIR = r"D:\Project\Visual Studio Code\MOSS-TTS-Nano-main"
+    # 前提：已在当前 Python 环境中 pip install -e /path/to/MOSS-TTS-Nano
 
     # ONNX 模型目录（None = 自动从 HuggingFace 下载）
     MOSS_MODEL_DIR = None  # str | None

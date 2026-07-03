@@ -46,11 +46,12 @@ ASR_env/input_voice/*.wav
 # --- LLM 对话记录 ---
 LLM_env/conversation_history.txt
 
-# --- 插件数据目录 ---
-!plugins_data/.gitkeep
-.vscode/settings.json
+# --- WorkBuddy 工作数据 ---
+.workbuddy/
 
-models/
+# --- Python 包构建产物 ---
+*.egg-info/
+
 # --- 安全数据库（Chroma 向量库）---
 safety_db/
 

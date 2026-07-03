@@ -302,8 +302,8 @@ class ASRManager:
         url = f"{self.base_url}/chat/completions"
         # 构造HTTP请求头，携带鉴权密钥与数据格式
         headers = {
-            "api-key": self.api_key,        # 接口鉴权密钥
-            "Content-Type": "application/json", # 请求体为JSON格式
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
         }
         # 构造接口请求体，遵循OpenAI兼容对话格式，嵌入音频base64数据
         payload = {

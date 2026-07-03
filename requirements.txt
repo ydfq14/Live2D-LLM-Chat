@@ -68,3 +68,4 @@ milvus-lite      # Milvus 本地数据库支持（无需独立 Milvus 服务）
 
 rank-bm25
 pywebview
+tf-keras
