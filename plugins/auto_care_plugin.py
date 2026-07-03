@@ -506,8 +506,11 @@ class AutoCarePlugin(PluginBase):
         state_file = self._data_dir / "care_state.json"
         if not state_file.exists():
             return
+        content = state_file.read_text(encoding="utf-8")
+        if not content.strip():
+            return  # 空文件，视为首次运行
         try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
+            data = json.loads(content)
             self._last_interaction_time = data.get("last_interaction_time", 0.0)
             self._conversation_round_count = data.get("conversation_round_count", 0)
             self._last_care_time = data.get("last_care_time", 0.0)

@@ -23,6 +23,7 @@ Milvus Lite 本地知识库控制器
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -46,17 +47,35 @@ log = logging.getLogger("kb_controller")
 # ===================== Windows 兼容性修复 =====================
 # Milvus Lite 在 Windows 上 os.rename 不会自动覆盖已存在的文件，
 # 需要替换为 os.replace 来修复 flush 失败的问题。
+# 使用 contextmanager 限缩作用域，避免全局 monkey-patch 干扰 logging 等其他模块。
 import sys as _sys
 if _sys.platform == "win32":
+    _rename_patch_needed = True
     import os as _os
     _original_rename = _os.rename
+
     def _windows_rename(src, dst):
-        """Windows 兼容的 rename：目标存在时自动覆盖。"""
+        """Windows 兼容的 rename：目标存在或占用时自动覆盖。"""
         try:
             _original_rename(src, dst)
-        except FileExistsError:
+        except (FileExistsError, PermissionError):
             _os.replace(src, dst)
-    _os.rename = _windows_rename
+
+    @contextlib.contextmanager
+    def _patched_rename():
+        """仅在 Milvus 写入操作期间临时替换 os.rename，操作完成后恢复。"""
+        _os.rename = _windows_rename
+        try:
+            yield
+        finally:
+            _os.rename = _original_rename
+else:
+    _rename_patch_needed = False
+
+    @contextlib.contextmanager
+    def _patched_rename():
+        """非 Windows 平台：空操作。"""
+        yield
 
 # ===================== 默认配置 =====================
 DEFAULT_MILVUS_URI = "./plugins_data/agentic_rag/kb.db"
@@ -673,11 +692,9 @@ class MilvusLiteKBController:
             for ci, (content, emb) in enumerate(zip(chunks, embeddings))
         ]
 
-        self._collection.insert(data)
-        try:
+        with _patched_rename():
+            self._collection.insert(data)
             self._collection.flush()
-        except Exception as e:
-            log.warning("Flush 跳过（Milvus Lite Windows 兼容问题）: %s", e)
 
         # 更新 BM25 索引
         self._bm25.add_batch(
@@ -706,11 +723,9 @@ class MilvusLiteKBController:
 
     def delete_file(self, file_id: int):
         """删除指定文件的所有 chunk。"""
-        self._collection.delete(expr=f"file_id == {file_id}")
-        try:
+        with _patched_rename():
+            self._collection.delete(expr=f"file_id == {file_id}")
             self._collection.flush()
-        except Exception as e:
-            log.warning("Flush 跳过（Milvus Lite Windows 兼容问题）: %s", e)
         self._bm25.remove_by_file(file_id)
         self._save_bm25_cache_if_needed()
 

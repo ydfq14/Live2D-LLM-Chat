@@ -1,6 +1,7 @@
 # 导入logging标准日志库核心模块
 import logging
 import os
+import shutil
 # 导入按时间自动切割日志文件的处理器（避免单个日志文件无限膨胀）
 from logging.handlers import TimedRotatingFileHandler
 
@@ -48,6 +49,39 @@ class ColoredFormatter(logging.Formatter):
 
         return result
 
+class SafeTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """Windows 兼容的三级 fallback 日志轮转。
+
+    Python 标准库的 rotate() 在 Windows 上有两个 PermissionError 场景：
+    1. 目标文件已存在 → os.rename 抛 PermissionError（而非 FileExistsError）
+    2. 源文件被其他进程锁定 → 即使删了目标也无法 rename
+
+    三级 fallback：
+    Level 1: super().rotate()           — 正常情况
+    Level 2: os.remove(dest) + rename   — dest 存在导致失败
+    Level 3: shutil.copy2 + 截断源文件   — source 被锁定
+    """
+
+    def rotate(self, source: str, dest: str) -> None:
+        try:
+            super().rotate(source, dest)
+        except PermissionError:
+            # Level 2: 目标文件已存在，先删除再 retry
+            if os.path.exists(dest):
+                os.remove(dest)
+            try:
+                os.rename(source, dest)
+            except PermissionError:
+                # Level 3: 源文件被锁定，用 copy + 截断兜底
+                shutil.copy2(source, dest)
+                # 源文件无法删除（被外部进程锁定），截断旧内容
+                try:
+                    with open(source, 'w', encoding='utf-8') as f:
+                        f.truncate(0)
+                except PermissionError:
+                    pass  # 截断也失败就算了，下次写入会覆盖
+
+
 def get_logger(name=__name__):
     """
     封装获取日志器的工厂函数，全局只生成一份日志配置，避免重复添加处理器
@@ -80,7 +114,7 @@ def get_logger(name=__name__):
     sh.setFormatter(colored_fmt)  # 给控制台处理器绑定颜色格式化器
 
     # ========== 处理器2：TimedRotatingFileHandler 按天切分日志文件 ==========
-    th = TimedRotatingFileHandler(
+    th = SafeTimedRotatingFileHandler(
         "logs/run.log",      # 日志主文件名
         when="D",           # 切割单位：D=天；可选H小时/M分钟/S秒
         interval=1,         # 间隔周期：每1天切割一次新日志文件
